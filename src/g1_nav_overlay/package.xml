@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>g1_nav_overlay</name>
+  <version>0.0.1</version>
+  <description>
+    Nav2/slam_toolbox configuration overlay adapted to the G1's footprint,
+    starting from vendor/home2/navigation/nav_main/config (nav2_standard.yaml,
+    omni_config, mapper_params_sim.yaml). See docs/plan.md.
+  </description>
+  <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

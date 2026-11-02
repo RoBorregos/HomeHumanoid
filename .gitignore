@@ -1,0 +1,22 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+**/__pycache__/
+*.pyc
+
+# third_party clones (see third_party/README.md for setup instructions)
+third_party/unitree_mujoco/
+third_party/unitree_rl_lab/
+third_party/unitree_ros/
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# env
+.env
+

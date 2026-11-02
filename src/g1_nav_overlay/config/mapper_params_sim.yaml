@@ -1,0 +1,28 @@
+# slam_toolbox (online async) for the G1 in sim, starting from the pattern in
+# vendor/home2/navigation/nav_main/config/mapper_params_sim.yaml.
+#
+# scan_topic assumes pointcloud_to_laserscan has already flattened the
+# simulated Livox MID-360 point cloud into a 2D LaserScan (see docs/plan.md,
+# SLAM/localization section). TODO (M3): confirm the real frame_id once
+# g1_description/urdf exists with the sim sensors mounted.
+
+slam_toolbox:
+  ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+
+    mode: mapping
+
+    resolution: 0.05
+    max_laser_range: 20.0
+    minimum_time_interval: 0.3
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+
+    do_loop_closing: true
+    loop_search_maximum_distance: 3.0

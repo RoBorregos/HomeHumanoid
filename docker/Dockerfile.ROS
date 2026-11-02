@@ -1,0 +1,30 @@
+# Base image for HomeHumanoid (cpu/cuda). Mirrors home2's pattern
+# (see vendor/home2/docker/Dockerfile.ROS once the submodule is initialized)
+# so vendored packages build under the same toolchain.
+ARG ROS_DISTRO=jazzy
+FROM ros:${ROS_DISTRO}-ros-base
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-pip \
+    git \
+    ros-${ROS_DISTRO}-navigation2 \
+    ros-${ROS_DISTRO}-nav2-bringup \
+    ros-${ROS_DISTRO}-slam-toolbox \
+    ros-${ROS_DISTRO}-ros-gz \
+    ros-${ROS_DISTRO}-gz-ros2-control \
+    ros-${ROS_DISTRO}-pointcloud-to-laserscan \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /ws
+
+# The workspace (src/, vendor/) is mounted as a volume in docker-compose;
+# rosdep + colcon build are run manually inside the container (see README.md).
+
+RUN rosdep init || true
+
+SHELL ["/bin/bash", "-c"]
+CMD ["bash"]

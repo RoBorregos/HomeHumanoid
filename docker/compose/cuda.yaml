@@ -1,0 +1,31 @@
+services:
+  homehumanoid:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.ROS
+      args:
+        ROS_DISTRO: jazzy
+    image: homehumanoid:cuda
+    container_name: homehumanoid_cuda
+    network_mode: host
+    ipc: host
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ../../src:/ws/src
+      - ../../vendor:/ws/vendor
+      - ../../third_party:/ws/third_party
+      - ../../worlds:/ws/worlds
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    stdin_open: true
+    tty: true

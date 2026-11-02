@@ -1,0 +1,21 @@
+services:
+  homehumanoid:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.ROS
+      args:
+        ROS_DISTRO: jazzy
+    image: homehumanoid:cpu
+    container_name: homehumanoid_cpu
+    network_mode: host
+    ipc: host
+    volumes:
+      - ../../src:/ws/src
+      - ../../vendor:/ws/vendor
+      - ../../third_party:/ws/third_party
+      - ../../worlds:/ws/worlds
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    stdin_open: true
+    tty: true
