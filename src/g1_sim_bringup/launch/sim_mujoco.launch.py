@@ -3,15 +3,20 @@
 M2b scaffold. Unlike sim_gz.launch.py, the simulator (unitree_mujoco) and the
 RL policy controller (unitree_rl_lab's g1_ctrl) are NOT ROS 2 nodes — they are
 external processes started by hand (or from a separate script) before running
-this launch file:
+this launch file. Config is via simulate/config.yaml, not CLI flags — see
+third_party/README.md:
 
-    cd third_party/unitree_mujoco && ./unitree_mujoco -r g1 -s scene_terrain.xml
-    cd third_party/unitree_rl_lab && ./g1_ctrl --network <iface>
+    cd third_party/unitree_mujoco/simulate/build && ./unitree_mujoco
+    cd third_party/unitree_rl_lab/deploy/robots/g1_29dof/build && ./g1_ctrl --network lo
 
 This launch file only brings up the ROS 2 side: the g1_base_bridge node in
-rl_policy mode (interface NOT confirmed, see docs/plan.md open question #1)
-and Nav2. Odometry (SportModeState -> TF/nav_msgs/Odometry) is not implemented
-yet (pending M2b).
+rl_policy mode (see docs/plan.md, "M1 findings", for the confirmed
+rt/lowstate wireless_remote mechanism it uses) and Nav2. Odometry is NOT yet
+wired — G1's SportModeState_ (unitree_hg) only carries fsm_id/fsm_mode/
+task_id/task_time, no position/velocity, unlike go2's; the real odometry
+source for TF/nav_msgs/Odometry still needs to be identified (likely IMU
+orientation + leg kinematics/state estimator — open question, see
+docs/plan.md).
 """
 
 from ament_index_python.packages import get_package_share_directory

@@ -6,7 +6,11 @@
   <description>
     Bridge between the cmd_vel Nav2 produces and the G1's active locomotion
     backend: Track A (Gazebo's VelocityControl plugin, idle legs) or Track B
-    (unitree_rl_lab's command interface, RL walking policy in MuJoCo).
+    (unitree_rl_lab's RL walking policy, driven via the rt/lowstate
+    wireless_remote relay-with-override pattern — see docs/plan.md,
+    "M1 findings"). Track B requires unitree_sdk2_python (pip install, not a
+    rosdep key) in addition to the ROS 2 deps below, since this package is a
+    hybrid rclpy + raw-DDS process.
   </description>
   <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
   <license>Apache-2.0</license>
@@ -17,7 +21,6 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>tf2_ros</depend>
-  <depend>std_msgs</depend>
 
   <export>
     <build_type>ament_python</build_type>
