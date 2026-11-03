@@ -10,6 +10,10 @@ third_party/unitree_mujoco/
 third_party/unitree_rl_lab/
 third_party/unitree_ros/
 
+# vendored G1 URDF/meshes (run src/g1_description/scripts/vendor_g1.sh)
+src/g1_description/urdf/g1_29dof_raw.urdf
+src/g1_description/meshes/
+
 # editors / OS
 .vscode/
 .idea/
