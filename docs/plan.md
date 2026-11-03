@@ -54,9 +54,11 @@ M1 was run on the team's Jetson Orin (HRI Orin, ssh over Tailscale). Key correct
   FSM: Change state from Passive to FixStand
   FSM: Change state from FixStand to Velocity
   ```
-  A second relay (`third_party/walk_relay.cc`) then set `lx=0.3` for 4s to command forward walking (not yet visually confirmed on this machine — the Orin's RDP session had a display issue after an unrelated reboot — but the control path is proven end-to-end).
 - **Resolves open question #3 (ROS 2 vs. raw DDS boundary)**: the clean boundary is NOT "ROS 2 only touches `g1_base_bridge` from outside." Track B's `g1_base_bridge` must itself be a **hybrid process**: an `rclpy` node (subscribing to Nav2's `cmd_vel`) that also opens a `unitree_sdk2_python` DDS participant and runs the lowstate-relay-with-override pattern above, translating `Twist.linear.x/y` and `Twist.angular.z` into the `lx`/`ly`/`rx` fields each time a new `rt/lowstate` sample arrives. This needs `unitree_sdk2_python` installed (pip, needs CycloneDDS headers) as a new dependency of the `g1_base_bridge` package — not previously listed.
-- **M1's deliverable (G1 FSM reaching `Velocity`, i.e. "standing and ready to walk") is effectively done**, modulo a visual recording once the Orin's display issue is sorted — the underlying DDS control path is proven via `g1_ctrl`'s own log output, independent of the viewer.
+- **M1 is fully confirmed, including visual proof of real walking.** The Orin's RDP session had a display issue after an unrelated reboot (couldn't connect to the real desktop), so `unitree_mujoco` was instead run under a headless `Xvfb` virtual display (`sudo apt install xvfb imagemagick xdotool`) and screenshotted directly (`DISPLAY=:99 import -window root shot.png`) — this is a reusable pattern for any future headless verification on this Orin. Two consecutive screenshots, ~2s apart, show the G1 in two completely different dynamic stride poses (one leg planted/one reaching forward, then a crouched running-like pose moments later) — conclusive evidence of continuous, active walking under the RL policy, not a frozen/static pose.
+  - **Gotcha found along the way**: `State_RLBase`'s `enter()`/`run()` registers a per-tick `bad_orientation()` safety check that transitions straight back to `Passive` if tripped. The FSM bounced `Velocity -> Passive` within ~1ms on every attempt made *after* the G1 had been manually walked and had fallen once and the sim state was fixed via MuJoCo's "Reset" button — the elastic band's enable/disable runtime toggle is apparently independent of "Reset" (which only resets pose/velocity), so after a fall + manual band-release via key `9`, later `FixStand -> Velocity` attempts had no band support and tripped the orientation check. **Fix: fully restart `unitree_mujoco`** (not just click Reset) to get the band back to its config-default engaged state before retrying the FSM sequence.
+  - The elastic band itself is controlled by **raw keyboard input to the MuJoCo window** (keys `7`/`8`/`9` to lower/lift/toggle), a completely separate channel from the `rt/lowstate`-embedded joystick bits used for the FSM — simulated here via `xdotool key --window <id> 8` against the Xvfb display. Real hardware won't have this band at all, so this is sim-only scaffolding, not something `g1_base_bridge` needs to replicate.
+  - Releasing the band too early (before the policy has had a few seconds to settle into a stable stance after lowering) caused one fall — worth a deliberate settle delay in any future scripted sequence, though this doesn't block M2 since the band isn't part of the real bridge design.
 
 ## SLAM / localization
 
@@ -65,10 +67,15 @@ Use `slam_toolbox` (matches home2's current default, which is itself moving away
 ## Milestones
 
 - **M0 — Workspace scaffold.** Create the ROS 2 Jazzy workspace, Docker mirroring home2's `run.sh`/`Dockerfile.ROS` pattern (cpu/cuda variants; l4t for the Orin later), add home2 as a submodule, confirm `colcon build` of the vendored packages. Deliverable: buildable workspace + CI that builds the submodule.
-- **M1 — G1 standing/teleop in MuJoCo (no ROS 2 yet). Done (see "M1 findings" above), pending visual recording.** Built `unitree_mujoco` + `unitree_rl_lab`'s `g1_ctrl` on the Orin against a locally-installed `unitree_sdk2` (two installs were needed: one at `/opt/unitree_robotics` per `unitree_mujoco`'s README, one at the default `/usr/local` prefix per `unitree_rl_lab`'s README, since their CMakeLists hardcode different paths). No physical gamepad was available and this Jetson kernel has no `uinput`, so FSM transitions were driven via the `rt/lowstate` relay-with-override pattern instead — confirmed working via `g1_ctrl`'s log (`FSM: Change state ... to Velocity`). Deliverable: recording of the G1 walking under the RL policy in MuJoCo — still pending, blocked on an unrelated Orin RDP/display issue after a reboot.
-- **M2a — Nav2 goal-following over a kinematic virtual base (Track A, Gazebo).** Create `g1_description` (wrapped URDF + sim plugins), adapt `nav2_standard.yaml`/`omni_config` to the G1's footprint, write `g1_base_bridge` (passthrough-to-`VelocityControl` variant). Reuse `world_from_map.py` with an existing home2 map for a quick first test. Deliverable: a Nav2 goal makes the G1 (idle legs) glide to the destination in Gazebo using MPPI + slam_toolbox, just like FRIDA does today.
-- **M2b — Real locomotion (Track B, MuJoCo + RL policy).** Extend `g1_base_bridge` to target `unitree_rl_lab`'s command interface instead of `VelocityControl`; wire odometry from `SportModeState` into TF/`nav_msgs/Odometry`. Deliverable: the same goal-following demo, but the G1 actually walks via the RL policy in MuJoCo, driven end-to-end by Nav2.
-- **M3 — SLAM-built map + autonomous exploration.** Simulate the Livox MID-360 (via `pointcloud_to_laserscan`) and/or the D435i on whichever backend proved more stable in M2; run `slam_toolbox` in mapping mode, save a map, rerun Nav2 against it. Deliverable: the G1 autonomously maps and navigates a simulated scenario from scratch.
+- **M1 — G1 standing/teleop in MuJoCo (no ROS 2 yet). Done, including visual confirmation (see "M1 findings" above).** Built `unitree_mujoco` + `unitree_rl_lab`'s `g1_ctrl` on the Orin against a locally-installed `unitree_sdk2` (two installs were needed: one at `/opt/unitree_robotics` per `unitree_mujoco`'s README, one at the default `/usr/local` prefix per `unitree_rl_lab`'s README, since their CMakeLists hardcode different paths). No physical gamepad was available and this Jetson kernel has no `uinput`, so FSM transitions were driven via the `rt/lowstate` relay-with-override pattern instead. Deliverable: screenshots (not a video recording) of the G1 actively walking under the RL policy in MuJoCo, captured headlessly via Xvfb after the Orin's RDP session broke post-reboot.
+- **M2a — Full Track A navigation stack: map it, tag it, navigate it. Implemented, pending `vendor/home2` submodule + colcon build + a run on the Orin to validate.** Scope grew from "goal-following against a pre-built map" to parity with what `home2` does for FRIDA: mapping, area/location tagging, and autonomous goal-reaching, all built on one shared Gazebo foundation. Key design, confirmed against `home2`'s real source (not guessed):
+  - `g1_description/urdf/g1.urdf.xacro` wraps a vendored `unitree_ros` G1 URDF (`scripts/vendor_g1.sh` — gitignored output, run on any machine that builds this package): `VelocityControl` + `OdometryPublisher` Gazebo plugins on `pelvis` (G1's real root link — **not** `base_link`), a `gpu_lidar` on the pre-existing `mid360_link` mount point, and the 29 leg/waist/arm joints locked `revolute` -> `fixed` for Track A's static idle stance.
+  - `g1_base_bridge`'s Track A now has a watchdog (ported from home2's `cmd_vel_relay.py`) zeroing the Twist if Nav2 stops sending `cmd_vel` — Gazebo's `VelocityControl` holds the last command forever otherwise.
+  - `g1_nav_overlay/config/nav2_g1.yaml` + `nav2_g1_sim_overlay.yaml` port `nav2_omni.yaml`'s MPPI/critics structure from home2, deep-merged at launch (same pattern as `nav2_omni.launch.py`'s `_deep_merge()`) and fed to **stock `nav2_bringup`'s `navigation_launch.py`** (not home2's composable-node container — `autostart:true` there does for free what home2 relies on `nav_central.py`, out of scope here, to trigger).
+  - `g1_sim_bringup/launch/sim_gz.launch.py` (Fase 4, navigate) and `sim_mapping.launch.py` (Fase 2, map) share the same world/spawn/bridge setup, defaulting to `home2`'s existing `robocup2026_1` map + `arena_robocup2026_1.sdf` world as a first smoke test (no new world-building needed). `localization.launch.py` and `slam.launch.py` from `vendor/home2/navigation/packages/nav_main` are included **unmodified** — both confirmed robot-agnostic by reading their source.
+  - Fase 3 (tag) reuses `vendor/home2/navigation/packages/map_context/scripts/map_area_tagger.py` **unmodified** — a standalone PyQt5 app with no ROS/FRIDA coupling, loads a `.pgm`/`.yaml`, exports `areas.json`.
+  - See `docs/plan.md`'s own history is superseded here by the fuller ephemeral plan this was implemented from; the concrete file list and design rationale live in git history / the implementation itself.
+- **M2b — Real locomotion (Track B, MuJoCo + RL policy).** Not started. Extend `g1_base_bridge`'s `rl_policy` backend's `cmd_vel` handling to drive actual walking via Nav2; the `SportModeState` odometry gap (G1's `unitree_hg` variant carries no position/velocity, confirmed in M1) is still unresolved and blocks TF/`nav_msgs/Odometry` wiring for this track specifically — not a problem for M2a's Track A, which gets perfect ground-truth odometry for free from Gazebo's `OdometryPublisher` plugin.
 - **M4 — Integration with home2's `task_manager`/vision/HRI.** Wire `task_manager`'s orchestration (first confirm its internal mechanism: BT, state machine, or LLM planner) to emit nav goals to the G1 stack instead of FRIDA's; bring in vision (YOLO/VLM) and HRI (STT/NLP) unmodified, confirming they're robot-agnostic. Deliverable: a GPSR-style demo ("go to X, find Y") running on the G1 sim stack.
 - **M5 — Sim-to-real toward the physical G1.** Since the hardware is already owned, this phase is in scope for this cycle: replace MuJoCo with real `unitree_sdk2`/DDS on the robot, validate the same `g1_base_bridge` and Nav2 configs against real sensor data and real locomotion latency/safety margins.
 
@@ -85,7 +92,7 @@ HomeHumanoid/
     g1_description/              # URDF/xacro wrapping unitree_ros g1_description + sim plugins
     g1_base_bridge/               # cmd_vel -> VelocityControl (Track A) | unitree_rl_lab command (Track B)
     g1_sim_bringup/               # launch files per track (sim_gz.launch.py, sim_mujoco.launch.py)
-    g1_nav_overlay/               # nav2_standard overlay + omni_config adapted to the G1 footprint
+    g1_nav_overlay/               # nav2_g1.yaml + sim overlay + bridge_gz.yaml + mapper_params (localization/mapping)
   third_party/
     unitree_mujoco/              # cloned directly (fast-moving repo, not a submodule)
     unitree_rl_lab/
@@ -98,7 +105,7 @@ HomeHumanoid/
 1. ~~`unitree_rl_lab`'s command interface~~ — **Resolved**, see "M1 findings" above: it's the `wireless_remote` bytes inside `rt/lowstate`, not a `/command` topic.
 2. **`task_manager`'s internal mechanism** in home2 (BT vs. state machine vs. LLM planner) — confirm before M4, since it affects how nav goals get emitted to the new G1 stack.
 3. ~~ROS 2 vs. raw DDS boundary~~ — **Resolved**, see "M1 findings" above: `g1_base_bridge` (Track B) is a hybrid `rclpy` + `unitree_sdk2_python` process, not a pure ROS 2 node.
-4. **Walking not yet visually confirmed**: the forward-velocity relay (`walk_relay.cc`) ran without errors and the FSM reached `Velocity`, but actual walking motion hasn't been visually confirmed yet (Orin RDP display issue after a reboot). Re-confirm once the display is working, or by decoding joint motor positions from `rt/lowstate` over time as a non-visual check.
+4. ~~Walking not yet visually confirmed~~ — **Resolved**: confirmed visually via Xvfb + screenshots, see "M1 findings" above.
 5. **G1 odometry source for Nav2's TF/`nav_msgs/Odometry`**: the plan originally assumed `SportModeState` would carry position/velocity (true for go2). **Confirmed false for G1**: `unitree_hg::msg::dds_::SportModeState_` only has `fsm_id`/`fsm_mode`/`task_id`/`task_time` — no pose. The real odometry source (state estimator fused from IMU + leg kinematics, possibly published elsewhere, or something `g1_base_bridge` has to compute itself) needs to be identified before M2b's odometry wiring can be written.
 
 ## Verification
@@ -109,3 +116,263 @@ HomeHumanoid/
 - M3: run SLAM online, save a map, restart Nav2 against the saved map, confirm correct localization (AMCL/slam_toolbox localization mode).
 - M4: run a sample GPSR-style task end-to-end and confirm vision/HRI/task_manager required no code changes, only robot configuration.
 - M5: physical safety checklist (clear area, accessible emergency stop, conservative velocity limits) before any test on the real G1.
+
+## M2a (Fase 4 smoke test) findings — Orin validation session
+
+Validating the full Fase 4 stack (Gazebo + Nav2 + slam_toolbox localization +
+`g1_base_bridge`) on the Orin surfaced several real bugs, in order of
+discovery. All code fixes below are committed to the repo (not yet merged
+into the Orin's git checkout — only live-pushed there for iteration, per
+the "I pull on the Orin myself" workflow).
+
+1. **Gazebo's `OdometryPublisher` plugin stops publishing `/sim/odom`
+   shortly after spawn, even while the model keeps moving.** Confirmed via
+   `gz topic -e -t /world/.../pose/info`: the model's world pose kept
+   changing under `VelocityControl`, but `/sim/odom` published exactly once
+   (at spawn) and then never again — not a "publish on pose change" plugin
+   (that hypothesis was tested and refuted), just broken on this Gazebo
+   Harmonic build. **Fix**: removed the plugin and `/odom` bridge entry
+   entirely. `g1_base_bridge` now dead-reckons `/odom` itself by
+   integrating the same `vx/vy/wz` it already relays to
+   `VelocityControl` — exact for a velocity-controlled kinematic base (no
+   slip to model). New params: `spawn_x/y/yaw` (seed the integrator at the
+   real spawn pose, matching what the old plugin used to report),
+   `odom_out_topic`, `odom_publish_frequency`. Needs `use_sim_time: true`
+   passed explicitly now, since it calls `self.get_clock().now()` directly.
+
+2. **Zombie `gz sim` processes silently accumulate across launch/kill
+   cycles** if a cleanup `pgrep` pattern doesn't explicitly include
+   `gz sim`/`bin/gz` — they don't show up in `ros2 node list`-based
+   patterns at all. Symptom: `TF_OLD_DATA`, multiple publishers on
+   `/sim/odom` per `gz topic -i`. Always check `pgrep -fa 'gz sim'`
+   explicitly in any cleanup, by exact PID, never a broad `-f` pattern in
+   the same command that's also launching the next run (self-matching
+   bug — split kill and launch into separate shell invocations).
+
+3. **`/dev/shm` accumulates ~500KB of `fastrtps_*` files per DDS
+   participant created, forever, since `kill -9` skips graceful DDS
+   shutdown.** After ~3 hours of iteration this session it reached ~4GB
+   (thousands of files) plus a few-GB `iox-roudi`/iceoryx shared-memory
+   daemon left over from M1's direct-DDS testing. Cleaned up
+   (`find /dev/shm -maxdepth 1 -name 'fastrtps_*' -delete`, killed
+   `iox-roudi`) — turned out NOT to be the real-time-factor root cause
+   (see below), but worth doing periodically regardless on long-running
+   dev sessions on this box.
+
+4. **Root cause of catastrophic `real_time_factor` (~0.003, i.e. ~300x
+   slower than real-time) once the lidar sensor loads: this Orin's libEGL
+   can't get hardware acceleration through the X11 platform.**
+   `gz sim --headless-rendering` (and GUI mode under Xvfb — same thing,
+   Xvfb is a pure software X server with no real GPU/DRM binding) logs
+   `libEGL warning: egl: failed to create dri2 screen` and Ogre2 silently
+   falls back to software (llvmpipe) rendering. `eglinfo -B` on the Orin
+   confirms the Tegra GPU itself is fine and correctly detected — just not
+   through the X11 platform:
+   ```
+   GBM platform:        EGL vendor string: NVIDIA ... Tegra Orin (nvgpu)   [works]
+   X11 platform:        eglInitialize failed                               [broken]
+   Surfaceless platform: EGL API version: 1.5                              [works]
+   ```
+   **Fix that works when gz-sim is invoked directly from a shell**: run it
+   with `DISPLAY` unset and `EGL_PLATFORM=surfaceless`. Confirmed via a
+   from-scratch manual rebuild of the whole stack (gz sim, robot spawn,
+   `ros_gz_bridge`, `g1_base_bridge`, `nav_main`'s `localization.launch.py`,
+   `nav2_bringup`'s `navigation_launch.py` — each started as its own
+   separate background process/shell, not inside one combined
+   `ros2 launch` tree): `real_time_factor` held at ~1.0 throughout, lidar
+   data flowed, `/odom` published at ~42-45Hz, `odom -> pelvis` TF
+   correct.
+   (Also tried switching the lidar sensor type from `gpu_lidar` to the CPU
+   raycast `lidar` type as an alternative fix, reasoning that CPU raycast
+   wouldn't need a render engine at all — **wrong**: in this Gazebo
+   version both sensor types still go through Ogre2's scene manager, so
+   that sensor never even got its topic advertised in server-only mode
+   with no renderer loaded. Reverted to `gpu_lidar`.)
+
+5. **Open problem, not yet resolved: the identical `EGL_PLATFORM=surfaceless`
+   + unset-`DISPLAY` fix, applied to the `gz sim` `ExecuteProcess` action
+   inside `sim_gz.launch.py` (verified via `/proc/<pid>/environ` on the
+   actual spawned process — the env *is* correctly `EGL_PLATFORM=surfaceless`
+   with no `DISPLAY` key), still logs the same `failed to create dri2
+   screen` warnings and still collapses `real_time_factor` to ~0.003, when
+   launched as part of the single combined `ros2 launch
+   g1_sim_bringup sim_gz.launch.py` tree.** Same binary, same world, same
+   robot, same environment (confirmed by inspection) as the manual test in
+   finding 4 — the only difference is being spawned via
+   `launch.actions.ExecuteProcess` inside one big `LaunchDescription`
+   (alongside ~15 other `IncludeLaunchDescription`/`Node` actions) instead
+   of as a standalone background shell process. Not yet root-caused —
+   candidates not yet checked: whether `launch`'s own process-group/session
+   handling for `ExecuteProcess` differs from a plain `setsid` background
+   process in a way that affects Mesa/EGL's platform auto-detection
+   (unlikely given the env var is confirmed correct, but not ruled out);
+   whether some other action in the same launch tree sets `DISPLAY` back
+   via an environment variable action that runs after `gazebo` is
+   constructed but before it execs; or something specific to how `launch`
+   forks/execs subprocesses (e.g. via a PTY) that EGL's platform probing
+   reacts to differently than a raw background `&`.
+   **Recommended next step**: don't manage `gz sim` as a `launch.actions.
+   ExecuteProcess` inside `sim_gz.launch.py`/`sim_mapping.launch.py` at
+   all — start it as an independent process *before* calling
+   `ros2 launch` (plain shell script, or a systemd user service), and have
+   the launch files only bring up the ROS-side nodes (spawn, bridge,
+   base_bridge, localization/slam, nav2), connecting to the
+   already-running Gazebo instance. This exactly matches the
+   configuration that was proven to work end-to-end in finding 4, and
+   avoids re-deriving whatever `launch`-specific quirk is at play.
+   `sim_gz.launch.py`/`sim_mapping.launch.py` have NOT been restructured
+   this way yet — the `gazebo` `ExecuteProcess` action with the
+   `EGL_PLATFORM`/`DISPLAY` env fix is still in both files as committed,
+   since the fix is still correct/needed, just not sufficient on its own
+   inside the combined launch tree.
+
+## M2a continued — second Orin session: launch-file restructure, costmap/docking bugs, unresolved planning-distance limit
+
+Picked finding 5 back up. Rather than keep chasing the exact `launch`-vs-shell
+EGL discrepancy (never root-caused), implemented the recommended workaround
+directly: `sim_gz.launch.py` now has a `start_gazebo` launch arg (**default
+`false`**). With it false, the file skips creating the `gazebo`
+`ExecuteProcess` entirely and assumes Gazebo is already running (started by
+hand, or by a future wrapper script, with `DISPLAY` unset and
+`EGL_PLATFORM=surfaceless` — see the file's own comments). This is the
+*practical* fix; the real root cause of why `ExecuteProcess` specifically
+breaks EGL (vs. an identical command backgrounded directly) is still
+unknown. One candidate surfaced but not conclusively tested: this Orin has
+a real `Xorg`/`gnome-shell` desktop session running (not just our SSH
+session), holding `/dev/dri/renderD128` — a second render node
+(`renderD129`) is free and used by our Xvfb. Possibly related, not proven.
+The staggered-`TimerAction` startup added earlier (suspecting CPU-contention
+during gz-sim's EGL init) was **disproven** — `real_time_factor` was
+already broken at t=3s, before anything else had started — but the
+staggering was left in for unrelated, legitimate "don't race world-loading"
+reasons.
+
+With Gazebo started externally and `sim_gz.launch.py ... start_gazebo:=false`
+run on top of it, two more real bugs surfaced and were fixed:
+
+6. **A stray `docking_server` process from an much-earlier launch/kill
+   cycle this session was never killed (PID far lower than the rest of the
+   current batch), and was still alive, claiming the same ROS node name
+   (`/docking_server`) as the current run's own docking_server.** Two nodes
+   with an identical fully-qualified name on the same ROS graph is
+   undefined behavior — this is suspected to be why `ros2 node list` only
+   ever printed `/docking_server` and nothing else in this session (even
+   though every other node was confirmed alive via `pgrep` and via
+   `ros2 action list` correctly listing all of nav2's actions,
+   `/navigate_to_pose` included — discovery wasn't actually broken overall,
+   just this one node-identity collision). **Fix**: kill every nav2-related
+   PID explicitly by PID (not by pattern) before relaunching nav2 — this is
+   the same "always check for stragglers by PID, not just by pattern"
+   lesson from earlier in this doc, now extended to *every* long-running
+   ROS node, not just `gz sim`.
+
+7. **The global costmap doesn't resize to the real map on `autostart`.**
+   Confirmed via `/global_costmap/costmap`'s own published `width`/`height`:
+   it started at a default 100x100 (5m x 5m) patch at the origin, logged
+   `"Robot is out of bounds of the costmap"` and
+   `"Sensor origin at (4.20, -11.74) is out of map bounds (0.00, 0.00) to
+   (4.98, 4.98)"` — even though `StaticLayer: Resizing costmap to 502 X 410`
+   *did* eventually log a few seconds later, matching the real map. After
+   the goal-planning failures below triggered many
+   `clear_entirely_global_costmap` recovery calls, the live costmap topic
+   stopped publishing new data entirely (confirmed via
+   `ros2 topic hz` timing out, and a direct rclpy subscription with
+   TRANSIENT_LOCAL QoS always returning the exact same stale message,
+   frozen at sim-time 420s, no matter how much later it was queried).
+   **Fix applied**: kill nav2's processes (including the stray
+   docking_server from finding 6) and relaunch nav2 fresh — after a clean
+   restart, `/global_costmap/costmap` correctly reported the full 502x410
+   grid and kept publishing. Not root-caused *why* the first autostart
+   attempt (racing against the stray docking_server and whatever triggered
+   the early out-of-bounds warnings) leaves the costmap in this state —
+   just confirmed a clean nav2-only restart fixes it. Worth another look if
+   it recurs on a from-scratch launch (no stray processes).
+
+8. **Open problem, not resolved: `NavigateToPose`/`ComputePathToPose` fails
+   for any goal beyond roughly 1m from the robot's current (localized)
+   position, even with a healthy, correctly-sized, freshly-restarted
+   costmap.** Reproduced extensively:
+   - Goals within ~0.5-0.6m of the robot's current pose: `compute_path_to_pose`
+     returns `error_code: 0`, `SUCCEEDED`, `planning_time` ~2ms.
+   - Goals ~1m or farther (tested a sequence of points from 1m out to the
+     original ~5.5m target at `(3.28, -6.13)`, including several
+     intermediate points along the straight-line path): **every single one**
+     fails identically — `planner_server` logs
+     `"GridBased plugin failed to plan from (sx, sy) to (gx, gy): 'Failed to
+     create plan with tolerance of: 0.500000'"`, and the action returns
+     `error_code: 208`, `ABORTED`.
+   - This is **not** a lethal-obstacle/geometry problem: wrote a small rclpy
+     script (subscribing to `/global_costmap/costmap` with matching
+     TRANSIENT_LOCAL QoS) to dump actual cost values along the straight-line
+     path and in a 2D neighborhood grid around the transition point between
+     a succeeding and a failing goal. All sampled cells between the robot
+     and the goal are cost 0 (free) or in the 60-100 range (inflation
+     gradient, well below the 253/254 lethal/inscribed thresholds) — no
+     thin wall or lethal barrier visible in the sampled cells. The robot's
+     *own* cell sits in a wide ~99-cost plateau (consistent with being
+     roughly 0.35m from a real wall, matching `behavior_server`'s
+     independently-reported `"Collision Ahead - Exiting Spin"` when a
+     recovery spin was attempted) — but the one successful short-path test
+     target was *also* inside that same cost-99 region, so "near a wall"
+     alone doesn't explain the success/fail split either.
+   - `NavigateToPose`'s feedback during the full end-to-end attempt showed
+     `distance_remaining: 0.0` from the very first feedback message (never
+     reflecting the true ~5.5m remaining), 16-21 recovery attempts, and the
+     robot's position never changing at all (consistent with it never
+     having a valid path to follow in the first place).
+   - Ruled out so far: costmap size/staleness (retested fresh, same
+     result), lethal cells blocking the sampled path, the EGL/launch-tree
+     bug (unrelated — this was tested entirely after that was worked
+     around). Not yet tried: increasing planner verbosity to DEBUG (the
+     Orin's `ros2 param set` CLI hit the same node-discoverability
+     oddity as `ros2 lifecycle get`/`ros2 node list`, which blocked
+     reconfiguring `planner_server` live without a full relaunch);
+     comparing against `vendor/home2`'s real FRIDA footprint/inflation
+     values (**done** — FRIDA uses the *same* `inflation_radius: 0.45` with
+     an even *larger* rectangular footprint on this exact same map, which
+     argues against "our footprint/inflation is too conservative for this
+     map's corridors" as the explanation, though doesn't fully rule it out
+     for G1's specific position/orientation); visual inspection via RViz
+     (not attempted this session — would need Xvfb + a screenshot
+     pipeline, same pattern as M1).
+   - Also noteworthy, possibly related or possibly a separate effect of
+     the same root cause: the robot's slam_toolbox-localized pose
+     (`map -> pelvis`, stable at `(3.54, -11.12)`, yaw ~26°) differs from
+     the nominal assumed spawn pose
+     (`(4.17764, -11.69743)`, yaw -1.989 rad ≈ -114°) by roughly 0.8m and
+     ~140° — far more than typical scan-matching jitter. This is the
+     *first* time in this whole project that slam_toolbox has had a
+     genuinely working lidar to localize against (every earlier session,
+     including all of M2a's first pass, had a non-functioning lidar sensor
+     — see findings above), so this may be the *first real localization
+     result* ever obtained here, and the discrepancy from the assumed
+     spawn pose might be either a genuine mislocalization or evidence that
+     the assumed `spawn_x/y/yaw` constants don't actually correspond to
+     `mapper_params_sim.yaml`'s `map_start_pose` as precisely as assumed.
+     Worth checking directly (e.g. temporarily zero cmd_vel entirely,
+     fresh spawn, compare `/odom` i.e. dead-reckoned pose against
+     `map -> pelvis` immediately after the very first scan, before any
+     scan-matching drift could accumulate) before assuming either the
+     localization or the planner is "wrong."
+
+**Status at end of this session**: Findings 1-4 (odometry self-computation,
+zombie cleanup, EGL/GPU fix) remain fixed and validated. Finding 5 (EGL
+breaks specifically inside `ros2 launch`) is *worked around* (not
+root-caused) via the new `start_gazebo:=false` default — `sim_gz.launch.py`
+now expects Gazebo to already be running. Findings 6-7 (stray docking_server,
+costmap not resizing/freezing) are fixed by always killing nav2 PIDs
+explicitly before a fresh restart. Finding 8 (planning fails beyond ~1m) is
+**unresolved** and is the current blocker on sending a real `NavigateToPose`
+smoke-test goal successfully — extensively characterized with reproducible
+test data (see above) but not root-caused despite many genuine attempts.
+Next session: pick finding 8 back up with the "not yet tried" list above,
+starting with checking whether the localization discrepancy noted at the
+end of finding 8 is itself the actual cause (e.g., if the robot's believed
+pose is subtly wrong, the planner's A* might be exploring from a
+degenerate/edge-of-map region that behaves correctly for very short hops but
+pathologically for longer ones). At the end of this session, the full stack
+(Gazebo with `start_gazebo:=false` externally started, `sim_gz.launch.py`
+on top of it, nav2 freshly restarted per finding 7's fix) was left running
+on the Orin for inspection — kill by PID (`gz sim`, `ros2 launch`, all
+`nav2_*`/`opennav_docking`/`slam_toolbox` processes) before starting a new
+attempt from scratch.
