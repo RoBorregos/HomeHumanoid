@@ -3,13 +3,20 @@
   G1 wrapped for Gazebo Track A (kinematic virtual base — see docs/plan.md).
   Includes the vendored g1_29dof_raw.urdf (run scripts/vendor_g1.sh first —
   this file and meshes/ are gitignored, not committed) and adds:
-    - VelocityControl + OdometryPublisher Gazebo plugins on `pelvis` (the
-      model's actual root link; G1's URDF does not use `base_link`).
+    - A VelocityControl Gazebo plugin on `pelvis` (the model's actual root
+      link; G1's URDF does not use `base_link`).
     - A gpu_lidar sensor on the existing `mid360_link` mount point, standing
       in for the real Livox MID-360 (2D-equivalent, not 3D-faithful — see
       docs/plan.md for why this is in-scope vs. the D435i, which isn't yet).
   The 29 leg/waist/arm joints are already locked to `fixed` by the vendor
   script (Track A has no actuation for them); this file does not touch them.
+
+  No OdometryPublisher plugin: it was confirmed to stop publishing /sim/odom
+  shortly after spawn on this Gazebo Harmonic build, even while the model
+  kept moving under VelocityControl (see g1_base_bridge's module docstring).
+  Odometry and the odom -> pelvis TF are published by g1_base_bridge instead,
+  dead-reckoned from the same cmd_vel it relays — exact for this
+  velocity-controlled kinematic base, and sidesteps the plugin entirely.
 -->
 <robot name="g1" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:include filename="g1_29dof_raw.urdf"/>
@@ -17,14 +24,6 @@
   <gazebo>
     <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
       <topic>/sim/cmd_vel</topic>
-    </plugin>
-    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
-      <odom_frame>odom</odom_frame>
-      <robot_base_frame>pelvis</robot_base_frame>
-      <odom_topic>/sim/odom</odom_topic>
-      <tf_topic>/sim/odom_tf</tf_topic>
-      <odom_publish_frequency>50</odom_publish_frequency>
-      <dimensions>2</dimensions>
     </plugin>
   </gazebo>
 
@@ -35,7 +34,16 @@
 
   <!-- 2D-equivalent stand-in for the real Livox MID-360, full 360 deg sweep
        (unlike FRIDA's two-lidar setup, G1 has one lidar with no blind wedge
-       to dodge). Mount point already exists in the vendored URDF. -->
+       to dodge). Mount point already exists in the vendored URDF.
+       gpu_lidar (not the CPU "lidar" type): both sensor types need Ogre2's
+       scene manager regardless, so there's no headless-rendering-avoidance
+       benefit to the CPU variant on this build. The real fix for this
+       Orin's headless EGL/GPU acceleration (libEGL: "failed to create dri2
+       screen" under X11/Xvfb) is in sim_gz.launch.py: the gazebo process
+       runs with DISPLAY unset and EGL_PLATFORM=surfaceless, which routes
+       EGL to the Tegra GPU directly instead of through X11 — confirmed via
+       `eglinfo -B` showing a working GBM/surfaceless platform on this box
+       even though the X11 platform fails. -->
   <gazebo reference="mid360_link">
     <sensor name="mid360_scan" type="gpu_lidar">
       <always_on>true</always_on>

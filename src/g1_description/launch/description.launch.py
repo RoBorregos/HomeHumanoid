@@ -1,8 +1,7 @@
 """Publishes the G1's robot_state_publisher from the xacro in urdf/.
 
-M2a placeholder: urdf/ currently only has instructions (README.md); g1.urdf.xacro
-still needs to be vendored from unitreerobotics/unitree_ros before this launch
-file actually works.
+Run src/g1_description/scripts/vendor_g1.sh first — g1.urdf.xacro includes
+the vendored g1_29dof_raw.urdf, which is gitignored (see urdf/README.md).
 """
 
 import os
@@ -12,6 +11,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -31,8 +31,9 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "robot_description": Command(
-                    ["xacro ", LaunchConfiguration("xacro_path")]
+                "robot_description": ParameterValue(
+                    Command(["xacro ", LaunchConfiguration("xacro_path")]),
+                    value_type=str,
                 )
             }
         ],

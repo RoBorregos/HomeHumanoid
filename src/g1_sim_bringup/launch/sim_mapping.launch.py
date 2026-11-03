@@ -53,10 +53,24 @@ def launch_setup(context, *args, **kwargs):
     gz_cmd = ["gz", "sim", "-r", "-v", "3", world]
     if not gui:
         gz_cmd[2:2] = ["-s", "--headless-rendering"]
+    # DISPLAY unset + EGL_PLATFORM=surfaceless: this Orin's libEGL fails to
+    # get hardware acceleration through the X11 platform ("failed to create
+    # dri2 screen", reproduced under both --headless-rendering and a real
+    # Xvfb DISPLAY), so Ogre2 falls back to software rendering and
+    # real_time_factor collapses to ~0.003. `eglinfo -B` confirms the Tegra
+    # GPU works fine through GBM/surfaceless — forcing that platform and
+    # removing DISPLAY (so nothing tries X11 first) restores real_time_factor
+    # to ~1.0 with gpu_lidar still producing real data. Built as a full
+    # env replacement (not additional_env) so DISPLAY is actually absent,
+    # not just empty.
+    gz_env = dict(os.environ)
+    gz_env.pop("DISPLAY", None)
+    gz_env["GZ_SIM_RESOURCE_PATH"] = _resource_path()
+    gz_env["EGL_PLATFORM"] = "surfaceless"
     gazebo = ExecuteProcess(
         cmd=gz_cmd,
         output="screen",
-        additional_env={"GZ_SIM_RESOURCE_PATH": _resource_path()},
+        env=gz_env,
     )
 
     description_launch = IncludeLaunchDescription(
@@ -93,7 +107,13 @@ def launch_setup(context, *args, **kwargs):
         executable="g1_base_bridge",
         name="g1_base_bridge",
         output="screen",
-        parameters=[{"backend": "gazebo"}],
+        parameters=[{
+            "backend": "gazebo",
+            "use_sim_time": True,
+            "spawn_x": float(spawn_x),
+            "spawn_y": float(spawn_y),
+            "spawn_yaw": float(spawn_yaw),
+        }],
     )
 
     slam = IncludeLaunchDescription(

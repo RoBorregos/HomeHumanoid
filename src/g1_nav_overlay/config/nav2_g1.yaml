@@ -98,7 +98,11 @@ controller_server:
         cost_power: 1
         cost_weight: 4.0
         critical_cost: 300.0
-        consider_footprint: true
+        # false, not true: footprint-aware collision checking needs an actual
+        # footprint polygon, which we deliberately don't provide (robot_radius
+        # instead — see footprint note above). Radius-based costmap inflation
+        # still applies; this only disables MPPI's extra footprint-shape check.
+        consider_footprint: false
         collision_cost: 1000000.0
         near_goal_distance: 0.8
         trajectory_point_step: 3
@@ -269,3 +273,56 @@ velocity_smoother:
     odom_duration: 0.1
     deadband_velocity: [0.05, 0.05, 0.05]
     velocity_timeout: 1.0
+
+# Not part of home2's own setup (older nav2 composable-node topology without
+# it), but stock nav2_bringup's navigation_launch.py (used here, see
+# docs/plan.md) wires it into the real output path:
+# controller_server -> velocity_smoother -> collision_monitor -> /cmd_vel
+# (the topic g1_base_bridge actually subscribes to). Values ported from
+# nav2_bringup's own default params.yaml, base_frame_id -> pelvis.
+collision_monitor:
+  ros__parameters:
+    use_sim_time: False
+    enable_stamped_cmd_vel: true
+    base_frame_id: "pelvis"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel"
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.2
+    source_timeout: 1.0
+    base_shift_correction: True
+    stop_pub_timeout: 2.0
+    polygons: ["FootprintApproach"]
+    FootprintApproach:
+      type: "polygon"
+      action_type: "approach"
+      footprint_topic: "/local_costmap/published_footprint"
+      time_before_collision: 1.2
+      simulation_time_step: 0.1
+      min_points: 6
+      visualize: False
+      enabled: True
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "scan"
+      min_height: 0.15
+      max_height: 2.0
+      enabled: True
+
+# Stock nav2_bringup component, not part of home2's own setup. G1 has no
+# charging dock in this phase — configured with the default plugin so the
+# lifecycle manager's configure step succeeds, but never actually invoked
+# (nothing calls the DockRobot action).
+docking_server:
+  ros__parameters:
+    use_sim_time: False
+    base_frame: "pelvis"
+    fixed_frame: "odom"
+    dock_plugins: ["simple_charging_dock"]
+    simple_charging_dock:
+      plugin: "opennav_docking::SimpleChargingDock"
+      use_external_detection_pose: true
+      use_battery_status: false
+      use_stall_detection: false

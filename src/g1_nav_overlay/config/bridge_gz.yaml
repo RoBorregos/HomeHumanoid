@@ -4,6 +4,12 @@
 # combined and trimmed: G1 has one lidar (no laserscan_multi_merger needed —
 # that only exists for FRIDA's two-lidar blind-wedge setup) and no ZED/arm
 # topics. /clock is essential: without it nothing with use_sim_time:true ticks.
+#
+# No /odom entry: Gazebo's OdometryPublisher plugin (previously bridged here
+# from /sim/odom) was confirmed to stop publishing shortly after spawn on
+# this Gazebo Harmonic build, even while the model kept moving — see
+# g1_base_bridge's module docstring. /odom is published directly by
+# g1_base_bridge instead, dead-reckoned from the same cmd_vel it relays.
 
 - ros_topic_name: /clock
   gz_topic_name: /clock
@@ -16,18 +22,6 @@
   ros_type_name: geometry_msgs/msg/Twist
   gz_type_name: gz.msgs.Twist
   direction: ROS_TO_GZ
-
-- ros_topic_name: /odom
-  gz_topic_name: /sim/odom
-  ros_type_name: nav_msgs/msg/Odometry
-  gz_type_name: gz.msgs.Odometry
-  direction: GZ_TO_ROS
-
-- ros_topic_name: /tf
-  gz_topic_name: /sim/odom_tf
-  ros_type_name: tf2_msgs/msg/TFMessage
-  gz_type_name: gz.msgs.Pose_V
-  direction: GZ_TO_ROS
 
 - ros_topic_name: /scan
   gz_topic_name: /g1/mid360_scan

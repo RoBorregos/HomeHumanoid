@@ -66,6 +66,7 @@ def launch_setup(context, *args, **kwargs):
     map_context_share = get_package_share_directory("map_context")
 
     gui = LaunchConfiguration("gui").perform(context).lower() == "true"
+    start_gazebo = LaunchConfiguration("start_gazebo").perform(context).lower() == "true"
     world = LaunchConfiguration("world").perform(context)
     map_name = LaunchConfiguration("map_name").perform(context)
     spawn_x = LaunchConfiguration("spawn_x").perform(context)
@@ -73,14 +74,34 @@ def launch_setup(context, *args, **kwargs):
     spawn_z = LaunchConfiguration("spawn_z").perform(context)
     spawn_yaw = LaunchConfiguration("spawn_yaw").perform(context)
 
-    gz_cmd = ["gz", "sim", "-r", "-v", "3", world]
-    if not gui:
-        gz_cmd[2:2] = ["-s", "--headless-rendering"]
-    gazebo = ExecuteProcess(
-        cmd=gz_cmd,
-        output="screen",
-        additional_env={"GZ_SIM_RESOURCE_PATH": _resource_path()},
-    )
+    gazebo_actions = []
+    if start_gazebo:
+        gz_cmd = ["gz", "sim", "-r", "-v", "3", world]
+        if not gui:
+            gz_cmd[2:2] = ["-s", "--headless-rendering"]
+        # DISPLAY unset + EGL_PLATFORM=surfaceless: this Orin's libEGL fails
+        # to get hardware acceleration through the X11 platform ("failed to
+        # create dri2 screen"), so Ogre2 falls back to software rendering
+        # and real_time_factor collapses to ~0.003. This env fix alone is
+        # NOT sufficient when gz sim runs as a launch.actions.ExecuteProcess
+        # inside this combined LaunchDescription — confirmed via
+        # /proc/<pid>/environ that the env is correctly applied either way,
+        # yet the dri2 failure still happens only when launched this way,
+        # not when launched as a plain background shell process. Root cause
+        # not identified (this Orin has a real Xorg/gnome-shell desktop
+        # session holding one of the two DRM render nodes, which may be
+        # related). See docs/plan.md's "M2a findings" for the full
+        # investigation. Practical fix: default `start_gazebo:=false` and
+        # start gz sim yourself as an independent background process
+        # (see g1_sim_bringup/README or docs/plan.md) before running this
+        # launch file — this flag exists so sim_gz.launch.py can still
+        # start Gazebo itself for convenience once the underlying bug is
+        # fixed, or on a machine that doesn't hit it.
+        gz_env = dict(os.environ)
+        gz_env.pop("DISPLAY", None)
+        gz_env["GZ_SIM_RESOURCE_PATH"] = _resource_path()
+        gz_env["EGL_PLATFORM"] = "surfaceless"
+        gazebo_actions.append(ExecuteProcess(cmd=gz_cmd, output="screen", env=gz_env))
 
     description_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -116,7 +137,13 @@ def launch_setup(context, *args, **kwargs):
         executable="g1_base_bridge",
         name="g1_base_bridge",
         output="screen",
-        parameters=[{"backend": "gazebo"}],
+        parameters=[{
+            "backend": "gazebo",
+            "use_sim_time": True,
+            "spawn_x": float(spawn_x),
+            "spawn_y": float(spawn_y),
+            "spawn_yaw": float(spawn_yaw),
+        }],
     )
 
     localization = IncludeLaunchDescription(
@@ -160,19 +187,22 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{"x": float(spawn_x), "y": float(spawn_y), "yaw": float(spawn_yaw)}],
     )
 
+    # Staggered startup: gives gazebo (when start_gazebo:=true) a few seconds
+    # to finish loading the world before spawn/bridge/slam/nav2 start — not
+    # about the EGL bug (ruled out: real_time_factor was already broken at
+    # t=3s, before anything else had started forking — see docs/plan.md's
+    # "M2a findings"), just normal "don't race the world-loading" sequencing.
     return [
-        gazebo,
-        description_launch,
-        spawn,
-        bridge,
-        base_bridge,
-        localization,
-        nav2,
+        *gazebo_actions,
+        TimerAction(period=4.0, actions=[description_launch, spawn]),
+        TimerAction(period=6.0, actions=[bridge, base_bridge]),
+        TimerAction(period=8.0, actions=[localization]),
+        TimerAction(period=12.0, actions=[nav2]),
         # Give slam_toolbox + nav2's lifecycle manager time to autostart
         # before seeding the initial pose (empirical delay, not tied to any
         # specific startup-sequencing mechanism since there's no nav_central
         # gate here — see docs/plan.md).
-        TimerAction(period=8.0, actions=[initial_pose]),
+        TimerAction(period=20.0, actions=[initial_pose]),
     ]
 
 
@@ -180,6 +210,17 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("gui", default_value="true"),
+            DeclareLaunchArgument(
+                "start_gazebo",
+                default_value="false",
+                description="Set true to have this launch file start gz sim itself. "
+                            "Default false: this Orin hits an EGL bug (software-rendering "
+                            "fallback, real_time_factor ~0.003) when gz sim runs as a "
+                            "launch.actions.ExecuteProcess inside this combined launch tree "
+                            "(not reproduced when started as a plain background process) — "
+                            "see docs/plan.md's 'M2a findings'. Start gz sim yourself first "
+                            "(DISPLAY unset, EGL_PLATFORM=surfaceless) and leave this false.",
+            ),
             DeclareLaunchArgument(
                 "world",
                 default_value=os.path.join(

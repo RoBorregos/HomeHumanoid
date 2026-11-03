@@ -8,6 +8,20 @@ seconds — Gazebo's VelocityControl plugin holds the last command forever
 otherwise, so without this the robot keeps drifting after Nav2 stops talking
 (lost connection, finished a goal mid-motion-blend, etc).
 
+Also publishes /odom and broadcasts the odom -> pelvis TF itself, computed
+by integrating the same cmd_vel it relays to Gazebo rather than reading
+Gazebo's OdometryPublisher plugin. That plugin's own <tf_topic> output was
+already confirmed empty on the Orin, but a second, worse issue killed the
+plugin entirely: its /sim/odom topic published exactly once (at spawn) and
+then never again, even while `gz topic -e` on the world's pose/info topic
+confirmed the model kept moving under VelocityControl — i.e. the plugin
+isn't just missing TF, it stops publishing odometry at all shortly after
+startup on this Gazebo Harmonic build. Since Track A's base is velocity-
+controlled (not physically simulated drift/slip), dead-reckoning from the
+commanded vx/vy/wz is exact — identical to what the plugin would report if
+it worked — so this sidesteps the plugin completely instead of chasing it
+further.
+
 Track B (backend=rl_policy): a hybrid process. In addition to being an rclpy
 node (to receive Nav2's cmd_vel), it opens a unitree_sdk2_python DDS
 participant and relays the robot's real rt/lowstate: every sample received is
@@ -32,13 +46,16 @@ ChannelPublisher/ChannelSubscriber pattern but have NOT yet been run; verify
 against the installed unitree_sdk2_python version before first use.
 """
 
+import math
 import struct
 import threading
 import time
 
-from geometry_msgs.msg import Twist, TwistStamped
+from geometry_msgs.msg import Twist, TwistStamped, TransformStamped
+from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
+from tf2_ros import TransformBroadcaster
 
 BACKEND_GAZEBO = "gazebo"
 BACKEND_RL_POLICY = "rl_policy"
@@ -89,6 +106,13 @@ class G1BaseBridge(Node):
         self.declare_parameter("cmd_vel_stamped", True)
         self.declare_parameter("gazebo_cmd_vel_topic", "/sim/cmd_vel")
         self.declare_parameter("cmd_vel_timeout", 0.5)
+        self.declare_parameter("odom_out_topic", "/odom")
+        self.declare_parameter("odom_frame", "odom")
+        self.declare_parameter("base_frame", "pelvis")
+        self.declare_parameter("odom_publish_frequency", 50.0)
+        self.declare_parameter("spawn_x", 0.0)
+        self.declare_parameter("spawn_y", 0.0)
+        self.declare_parameter("spawn_yaw", 0.0)
         self.declare_parameter("dds_domain_id", 0)
         self.declare_parameter("dds_network_interface", "lo")
         self.declare_parameter("cmd_vel_axis_scale", 1.0)
@@ -112,6 +136,19 @@ class G1BaseBridge(Node):
             self._last_cmd_vel_time = 0.0
             self._gz_stopped = True
             self.create_timer(self._cmd_vel_timeout / 2.0, self._gazebo_watchdog)
+
+            self._odom_frame = self.get_parameter("odom_frame").value
+            self._base_frame = self.get_parameter("base_frame").value
+            self._odom_x = self.get_parameter("spawn_x").value
+            self._odom_y = self.get_parameter("spawn_y").value
+            self._odom_yaw = self.get_parameter("spawn_yaw").value
+            self._odom_pub = self.create_publisher(
+                Odometry, self.get_parameter("odom_out_topic").value, 10
+            )
+            self._tf_broadcaster = TransformBroadcaster(self)
+            odom_freq = self.get_parameter("odom_publish_frequency").value
+            self._last_odom_time = self.get_clock().now()
+            self.create_timer(1.0 / odom_freq, self._publish_odom)
         elif self.backend == BACKEND_RL_POLICY:
             self._start_rl_policy_backend()
         else:
@@ -124,15 +161,14 @@ class G1BaseBridge(Node):
 
     def _on_cmd_vel(self, msg):
         twist = msg.twist if self.cmd_vel_stamped else msg
+        with self._lock:
+            self._vx = twist.linear.x
+            self._vy = twist.linear.y
+            self._wz = twist.angular.z
         if self.backend == BACKEND_GAZEBO:
             self._last_cmd_vel_time = time.monotonic()
             self._gz_stopped = False
             self._gz_pub.publish(twist)
-        elif self.backend == BACKEND_RL_POLICY:
-            with self._lock:
-                self._vx = twist.linear.x
-                self._vy = twist.linear.y
-                self._wz = twist.angular.z
 
     # ---- Track A watchdog (ported from home2's cmd_vel_relay.py) ----
 
@@ -141,6 +177,50 @@ class G1BaseBridge(Node):
             return
         self._gz_stopped = True
         self._gz_pub.publish(Twist())
+        with self._lock:
+            self._vx = self._vy = self._wz = 0.0
+
+    # ---- Track A odometry + TF (see module docstring: Gazebo's
+    # OdometryPublisher plugin stops publishing shortly after spawn on this
+    # build, so this dead-reckons from the same cmd_vel already being
+    # relayed to Gazebo instead) ----
+
+    def _publish_odom(self):
+        now = self.get_clock().now()
+        dt = (now - self._last_odom_time).nanoseconds * 1e-9
+        self._last_odom_time = now
+        with self._lock:
+            vx, vy, wz = self._vx, self._vy, self._wz
+
+        self._odom_yaw += wz * dt
+        self._odom_x += (vx * math.cos(self._odom_yaw) - vy * math.sin(self._odom_yaw)) * dt
+        self._odom_y += (vx * math.sin(self._odom_yaw) + vy * math.cos(self._odom_yaw)) * dt
+        qz = math.sin(self._odom_yaw / 2.0)
+        qw = math.cos(self._odom_yaw / 2.0)
+        stamp = now.to_msg()
+
+        odom = Odometry()
+        odom.header.stamp = stamp
+        odom.header.frame_id = self._odom_frame
+        odom.child_frame_id = self._base_frame
+        odom.pose.pose.position.x = self._odom_x
+        odom.pose.pose.position.y = self._odom_y
+        odom.pose.pose.orientation.z = qz
+        odom.pose.pose.orientation.w = qw
+        odom.twist.twist.linear.x = vx
+        odom.twist.twist.linear.y = vy
+        odom.twist.twist.angular.z = wz
+        self._odom_pub.publish(odom)
+
+        t = TransformStamped()
+        t.header.stamp = stamp
+        t.header.frame_id = self._odom_frame
+        t.child_frame_id = self._base_frame
+        t.transform.translation.x = self._odom_x
+        t.transform.translation.y = self._odom_y
+        t.transform.rotation.z = qz
+        t.transform.rotation.w = qw
+        self._tf_broadcaster.sendTransform(t)
 
     # ---- Track B: rt/lowstate relay-with-override (see module docstring) ----
 
