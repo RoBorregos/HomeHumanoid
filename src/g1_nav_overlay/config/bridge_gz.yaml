@@ -1,0 +1,36 @@
+# ros_gz_bridge config for G1's Track A kinematic virtual base.
+#
+# Mirrors vendor/home2/simulation/frida_gz_sim/config/{bridge.yaml,bridge_nav.yaml}
+# combined and trimmed: G1 has one lidar (no laserscan_multi_merger needed —
+# that only exists for FRIDA's two-lidar blind-wedge setup) and no ZED/arm
+# topics. /clock is essential: without it nothing with use_sim_time:true ticks.
+
+- ros_topic_name: /clock
+  gz_topic_name: /clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: gz.msgs.Clock
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /sim/cmd_vel
+  gz_topic_name: /sim/cmd_vel
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: gz.msgs.Twist
+  direction: ROS_TO_GZ
+
+- ros_topic_name: /odom
+  gz_topic_name: /sim/odom
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /tf
+  gz_topic_name: /sim/odom_tf
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: gz.msgs.Pose_V
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /scan
+  gz_topic_name: /g1/mid360_scan
+  ros_type_name: sensor_msgs/msg/LaserScan
+  gz_type_name: gz.msgs.LaserScan
+  direction: GZ_TO_ROS

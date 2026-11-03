@@ -2,7 +2,11 @@
 
 Track A (default, backend=gazebo): pure rclpy. Republishes straight to the
 command topic of Gazebo's VelocityControl plugin, same as FRIDA today (see
-docs/plan.md, M2a).
+docs/plan.md). Includes a watchdog (ported from home2's cmd_vel_relay.py)
+that zeroes the published Twist if no cmd_vel arrives within cmd_vel_timeout
+seconds — Gazebo's VelocityControl plugin holds the last command forever
+otherwise, so without this the robot keeps drifting after Nav2 stops talking
+(lost connection, finished a goal mid-motion-blend, etc).
 
 Track B (backend=rl_policy): a hybrid process. In addition to being an rclpy
 node (to receive Nav2's cmd_vel), it opens a unitree_sdk2_python DDS
@@ -83,7 +87,8 @@ class G1BaseBridge(Node):
         self.declare_parameter("backend", BACKEND_GAZEBO)
         self.declare_parameter("cmd_vel_in_topic", "/cmd_vel")
         self.declare_parameter("cmd_vel_stamped", True)
-        self.declare_parameter("gazebo_cmd_vel_topic", "/model/g1/cmd_vel")
+        self.declare_parameter("gazebo_cmd_vel_topic", "/sim/cmd_vel")
+        self.declare_parameter("cmd_vel_timeout", 0.5)
         self.declare_parameter("dds_domain_id", 0)
         self.declare_parameter("dds_network_interface", "lo")
         self.declare_parameter("cmd_vel_axis_scale", 1.0)
@@ -103,6 +108,10 @@ class G1BaseBridge(Node):
         if self.backend == BACKEND_GAZEBO:
             gz_topic = self.get_parameter("gazebo_cmd_vel_topic").value
             self._gz_pub = self.create_publisher(Twist, gz_topic, 10)
+            self._cmd_vel_timeout = self.get_parameter("cmd_vel_timeout").value
+            self._last_cmd_vel_time = 0.0
+            self._gz_stopped = True
+            self.create_timer(self._cmd_vel_timeout / 2.0, self._gazebo_watchdog)
         elif self.backend == BACKEND_RL_POLICY:
             self._start_rl_policy_backend()
         else:
@@ -116,12 +125,22 @@ class G1BaseBridge(Node):
     def _on_cmd_vel(self, msg):
         twist = msg.twist if self.cmd_vel_stamped else msg
         if self.backend == BACKEND_GAZEBO:
+            self._last_cmd_vel_time = time.monotonic()
+            self._gz_stopped = False
             self._gz_pub.publish(twist)
         elif self.backend == BACKEND_RL_POLICY:
             with self._lock:
                 self._vx = twist.linear.x
                 self._vy = twist.linear.y
                 self._wz = twist.angular.z
+
+    # ---- Track A watchdog (ported from home2's cmd_vel_relay.py) ----
+
+    def _gazebo_watchdog(self):
+        if self._gz_stopped or time.monotonic() - self._last_cmd_vel_time < self._cmd_vel_timeout:
+            return
+        self._gz_stopped = True
+        self._gz_pub.publish(Twist())
 
     # ---- Track B: rt/lowstate relay-with-override (see module docstring) ----
 

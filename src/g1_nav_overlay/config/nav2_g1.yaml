@@ -1,0 +1,271 @@
+# Nav2 parameters for the G1's Track A kinematic virtual base.
+#
+# Ported from vendor/home2/navigation/packages/nav_main/config/omni_config/
+# nav2_omni.yaml (FRIDA's real-robot holonomic-base profile), adapted:
+#   * robot_base_frame/base_frame -> pelvis (G1's URDF root link, not base_link)
+#   * odom_topic -> /odom (sim: Gazebo's OdometryPublisher plugin output)
+#   * footprint -> robot_radius (circular). A frozen-standing biped isn't a
+#     rectangle like FRIDA's wheelbase. PLACEHOLDER — measure on the spawned
+#     model before relying on this near real obstacles.
+#   * No rgbd_obstacle_layer: G1 has no depth camera in this phase, only the
+#     single mid360 lidar (see docs/plan.md). home2 has to trim this per-sim
+#     via an overlay; here it's just never in the base config.
+#
+# This is the "real robot" profile (use_sim_time: False); nav2_g1_sim_overlay.yaml
+# deep-merges the sim deltas on top at launch time (see sim_gz.launch.py).
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: False
+    global_frame: map
+    robot_base_frame: pelvis
+    odom_topic: /odom
+    bt_loop_duration: 50
+    default_server_timeout: 20
+    wait_for_service_timeout: 10000
+    # No default_nav_to_pose_bt_xml override: nav2's own packaged
+    # navigate_to_pose_w_replanning_and_recovery.xml is the same tree home2's
+    # copy of this file points at (per that file's own comment) — depending
+    # on nav_main's bt/ path isn't needed.
+
+bt_navigator_navigate_through_poses_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+bt_navigator_navigate_to_pose_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+controller_server:
+  ros__parameters:
+    use_sim_time: False
+    enable_stamped_cmd_vel: true
+    controller_frequency: 20.0
+    odom_topic: /odom
+    controller_plugins: ["FollowPath"]
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
+
+    general_goal_checker:
+      stateful: True
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.35
+      yaw_goal_tolerance: 0.25
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 36
+      model_dt: 0.07
+      batch_size: 1200
+      vx_std: 0.2
+      vy_std: 0.2
+      wz_std: 0.3
+      # Track A's base has no real kinematic limit (it's velocity-driven, not
+      # walking) — these are inherited placeholders, tuned for feel/safety
+      # rather than a real constraint. Revisit once Track B drives real
+      # locomotion limits.
+      vx_max: 0.5
+      vx_min: -0.3
+      vy_max: 0.5
+      wz_max: 1.5
+      ax_max: 2.2
+      ax_min: -1.8
+      ay_max: 2.0
+      az_max: 2.5
+      iteration_count: 2
+      prune_distance: 1.7
+      transform_tolerance: 0.2
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "Omni"
+      visualize: false
+      regenerate_noises: false
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic"]
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+        critical_cost: 300.0
+        consider_footprint: true
+        collision_cost: 1000000.0
+        near_goal_distance: 0.8
+        trajectory_point_step: 3
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.5
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 6.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 6.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        mode: 1  # NO_DIRECTIONAL_PREFERENCE — 360 deg lidar, free to face any way
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: pelvis
+      use_sim_time: False
+      rolling_window: true
+      width: 4
+      height: 4
+      resolution: 0.05
+      robot_radius: 0.3  # TODO: measure on the spawned G1 model (idle stance, see g1_description)
+      plugins: ["obstacle_layer", "inflation_layer"]
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.45
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 4.0
+          raytrace_min_range: 0.10
+          obstacle_max_range: 3.0
+          obstacle_min_range: 0.10
+      always_send_full_costmap: False
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 2.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: pelvis
+      use_sim_time: False
+      robot_radius: 0.3  # TODO: same placeholder as local_costmap
+      resolution: 0.05
+      track_unknown_space: true
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 4.0
+          raytrace_min_range: 0.10
+          obstacle_max_range: 3.0
+          obstacle_min_range: 0.10
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.45
+      always_send_full_costmap: False
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 20.0
+    use_sim_time: False
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true
+
+smoother_server:
+  ros__parameters:
+    use_sim_time: False
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: True
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: False
+    enable_stamped_cmd_vel: true
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors::Spin"
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors::DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors::Wait"
+    global_frame: odom
+    robot_base_frame: pelvis
+    transform_tolerance: 0.2
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.2
+    rotational_acc_lim: 3.2
+
+robot_state_publisher:
+  ros__parameters:
+    use_sim_time: False
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: False
+    enable_stamped_cmd_vel: true
+    smoothing_frequency: 20.0
+    scale_velocities: False
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.5, 0.5, 1.5]
+    min_velocity: [-0.3, -0.5, -1.5]
+    max_accel: [2.2, 2.0, 2.5]
+    max_decel: [-2.2, -2.0, -2.5]
+    odom_topic: /odom
+    odom_duration: 0.1
+    deadband_velocity: [0.05, 0.05, 0.05]
+    velocity_timeout: 1.0

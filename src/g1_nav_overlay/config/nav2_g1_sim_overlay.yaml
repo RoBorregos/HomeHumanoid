@@ -1,0 +1,53 @@
+# Sim deltas deep-merged onto nav2_g1.yaml at launch time (see sim_gz.launch.py
+# and vendor/home2/navigation/packages/nav_main/launch/omni_setup/
+# nav2_omni.launch.py's _deep_merge(), the pattern this mirrors).
+#
+# Everything runs on /clock (use_sim_time: True). odom_topic is already /odom
+# in the base file (G1 has no real-hardware odometry source analogous to
+# FRIDA's /odrive/odom), so this overlay mostly just flips use_sim_time.
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: True
+
+bt_navigator_navigate_through_poses_rclcpp_node:
+  ros__parameters:
+    use_sim_time: True
+
+bt_navigator_navigate_to_pose_rclcpp_node:
+  ros__parameters:
+    use_sim_time: True
+
+controller_server:
+  ros__parameters:
+    use_sim_time: True
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: True
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: True
+
+planner_server:
+  ros__parameters:
+    use_sim_time: True
+
+smoother_server:
+  ros__parameters:
+    use_sim_time: True
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: True
+
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: True
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: True

@@ -23,6 +23,7 @@ setup(
     entry_points={
         "console_scripts": [
             "g1_base_bridge = g1_base_bridge.base_bridge_node:main",
+            "initial_pose = g1_base_bridge.initial_pose:main",
         ],
     },
 )

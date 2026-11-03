@@ -34,7 +34,7 @@ def generate_launch_description():
             [
                 get_package_share_directory("g1_nav_overlay"),
                 "config",
-                "nav2_standard.yaml",
+                "nav2_g1.yaml",
             ]
         ),
         description="Nav2 overlay adapted to the G1's footprint",
