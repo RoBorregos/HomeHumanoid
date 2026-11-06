@@ -9,7 +9,9 @@
 //   vx = ly, vy = -lx, wz = -rx, each clamped to the policy's trained range.
 // The values are m/s and rad/s directly, there is no joystick scale.
 //
-// Safety: cmd_vel older than cmd_vel_timeout zeroes the command here. If this
+// Safety: cmd_vel that stopped arriving, or whose stamp is older than
+// cmd_vel_timeout, zeroes the command here. The stamp check matters because
+// collision_monitor was seen republishing a stale command forever. If this
 // process dies, g1_ctrl falls back to the simulator's own samples, whose remote
 // bytes are all zero.
 //
@@ -71,6 +73,11 @@ public:
 
     cmd_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
       "/cmd_vel", 10, [this](geometry_msgs::msg::TwistStamped::ConstSharedPtr m) {
+        const double age = (now() - rclcpp::Time(m->header.stamp, get_clock()->get_clock_type())).seconds();
+        if (age > cmd_timeout_) {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "Dropping stale cmd_vel, %.2fs old", age);
+          return;
+        }
         std::lock_guard<std::mutex> l(mutex_);
         vx_ = m->twist.linear.x;
         vy_ = m->twist.linear.y;
