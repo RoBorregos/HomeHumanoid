@@ -34,6 +34,11 @@ def main():
     def press(key):
         subprocess.run(["xdotool", "windowactivate", "--sync", window, "key", key], check=True)
 
+    deadline = time.time() + 20.0
+    while "z" not in state:
+        if time.time() > deadline:
+            raise SystemExit("no /odom received, is g1_rl_bridge running?")
+        spin(0.1)
     spin(2.0)
     last, flat = state["z"], 0
     for _ in range(30):

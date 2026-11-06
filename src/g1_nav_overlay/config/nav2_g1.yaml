@@ -21,7 +21,9 @@ bt_navigator:
     robot_base_frame: pelvis
     odom_topic: /odom
     bt_loop_duration: 50
-    default_server_timeout: 20
+    # Nav2's 20ms default loses the action server's acknowledgement under CPU load,
+    # and the behavior tree then aborts the whole goal with no recovery.
+    default_server_timeout: 200
     wait_for_service_timeout: 10000
     # No default_nav_to_pose_bt_xml override: nav2's own packaged
     # navigate_to_pose_w_replanning_and_recovery.xml is the same tree home2's
