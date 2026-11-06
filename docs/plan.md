@@ -119,3 +119,16 @@ HomeHumanoid/
 - **New bug: collisions tip the kinematic base over, which silently breaks dead-reckoned `/odom`.** During a multi-goal tour the model ended at z=1.52 with roll ~70deg, and localization was 1.4m off. A/B with no sensor, same 25s drive command: 37 collisions ended at pitch 82deg, z=0.23; zero collisions stayed level at z=0.79, RTF 1.0. `vendor_g1.sh` now strips all `<collision>` blocks. **Not yet validated: Nav2 goals on the zero-collision model**, because of the GPU problem below.
 - **GPU wedge (kernel, needs a reboot).** Starting with one `gz sim` during that tour, the render thread of every later GPU client is stuck in uninterruptible `D` state at `nvgpu_fifo_preempt_tsg`, including a plain `eglinfo`. Symptom: with a sensor model, Gazebo sleeps at 0 CPU with no `/clock` and logs `SceneBroadcaster: Timed out waiting for state`; a world with no sensors runs fine. Cause of the wedge is unknown (`dmesg` needs root). It looks like a URDF or launch bug but is not: the original 37-collision URDF hangs the same way. Check `wchan` of the `ruby` threads before debugging this symptom. Software rendering is not a fallback: Mesa llvmpipe segfaults in `driCreateNewScreen3`, both surfaceless and under Xvfb.
 - **Next, after a reboot:** run the five-location tour (kitchen, living_room, exit, inspection_point, start_location) on the zero-collision model, comparing `map -> pelvis` with Gazebo ground truth at each stop.
+
+## M2a continued — after the reboot (2026-11-05): tour results on the zero-collision model
+
+**Corrects the previous section: finding 8 had not fully disappeared.** A healthy sim removed most of it, but NavFn with `use_astar: true` still failed with "Failed to create a plan from potential when a legal potential was found". Same pose and goal: A* failed 3/3, Dijkstra planned. `nav2_g1.yaml` now sets `use_astar: false`.
+
+Two-lap tour with `start_gazebo:=true` and Dijkstra, checked against Gazebo ground truth: **9 of 10 goals SUCCEEDED**, z stayed at 0.79 with no tipping, RTF ~1.0. This also confirms the launch tree is not an RTF problem.
+
+**Still open (intermittent, not root-caused):**
+- `exit` aborted once with `NO_VALID_PATH` (208) and 15 recoveries: the planner found no path from around (1.7, -9.6) with "Failed to create plan with tolerance". The same goal passed cleanly on lap 2.
+- `inspection_point` succeeded on both laps but needed 9 recoveries, with the same planner warning, and stopped ~0.4m from the goal by ground truth (over `xy_goal_tolerance` 0.35, though within it by `map -> pelvis`).
+- Next check: inspect the live `/global_costmap/costmap` at a failure. Candidates, untested: narrow passages closed by robot_radius + inflation, or scan marks from a lidar now ~1.25m high versus a map built at FRIDA's lidar height.
+
+Stop the stack with SIGINT and wait; a straggler node can survive (seen: `waypoint_follower`), so check by PID. Avoid SIGKILL on `gz sim`: unproven as the cause of the GPU wedge, but it has not recurred in this session's graceful restart.

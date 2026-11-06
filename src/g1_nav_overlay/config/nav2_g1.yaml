@@ -217,7 +217,11 @@ planner_server:
     GridBased:
       plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.5
-      use_astar: true
+      # false, not true: with A* NavFn only computes a partial potential field
+      # and path extraction can fail ("Failed to create a plan from potential
+      # when a legal potential was found"). Same pose and goal: A* 3/3 failed,
+      # Dijkstra succeeded.
+      use_astar: false
       allow_unknown: true
 
 smoother_server:
