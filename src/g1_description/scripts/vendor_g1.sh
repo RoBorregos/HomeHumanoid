@@ -14,6 +14,12 @@
 #      the idle stance. Track A (Gazebo kinematic base) has no controller for
 #      them; left revolute, the model would collapse under gravity. Fixed
 #      sensor-mount joints (mid360_joint, d435_joint, imu_*) are untouched.
+#   3. Every <collision> block is removed. Track A's base is velocity-driven,
+#      not physically simulated: g1_base_bridge dead-reckons /odom from cmd_vel,
+#      so any contact force silently breaks odometry. With collisions, the
+#      locked legs dragged on the floor and tipped the model over mid-run, and
+#      buried at spawn_z:=0 they cost ~290ms per physics step. Obstacle
+#      avoidance is Nav2's job, from /scan.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +67,8 @@ ACTUATED_JOINTS=(
 for joint in "${ACTUATED_JOINTS[@]}"; do
   sed -i -E "s#(<joint name=\"${joint}\" type=)\"revolute\"#\1\"fixed\"#" "${RAW_OUT}"
 done
+
+perl -0pi -e 's#\s*<collision>.*?</collision>##gs' "${RAW_OUT}"
 
 echo "Vendored: ${RAW_OUT}"
 echo "Meshes:   ${MESHES_DIR} ($(find "${MESHES_DIR}" -type f | wc -l) files)"
