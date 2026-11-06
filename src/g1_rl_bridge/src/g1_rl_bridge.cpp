@@ -9,6 +9,11 @@
 //   vx = ly, vy = -lx, wz = -rx, each clamped to the policy's trained range.
 // The values are m/s and rad/s directly, there is no joystick scale.
 //
+// The policy does not track those values linearly: it has a dead zone (0.2 m/s
+// forward does nothing) and tracks well below the command (0.3 rad/s yields
+// 0.05 rad/s). Nav2 expects to get what it asks for, so each axis goes through a
+// table measured in MuJoCo, from desired velocity to the command that yields it.
+//
 // Safety: cmd_vel that stopped arriving, or whose stamp is older than
 // cmd_vel_timeout, zeroes the command here. The stamp check matters because
 // collision_monitor was seen republishing a stale command forever. If this
@@ -26,6 +31,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
@@ -52,6 +58,19 @@ constexpr uint16_t kR1 = 1 << 0, kL2 = 1 << 5, kX = 1 << 10, kUp = 1 << 12;
 constexpr uint8_t kRelayMark = 0xA5;
 
 double clampf(double v, double lo, double hi) { return std::min(hi, std::max(lo, v)); }
+
+// Piecewise-linear lookup on |v|, keeping the sign. Clamps past the table's end.
+double compensate(double v, const std::vector<double> & want, const std::vector<double> & cmd) {
+  const double a = std::fabs(v);
+  double out = cmd.back();
+  for (size_t i = 1; i < want.size(); ++i) {
+    if (a <= want[i]) {
+      out = cmd[i - 1] + (a - want[i - 1]) / (want[i] - want[i - 1]) * (cmd[i] - cmd[i - 1]);
+      break;
+    }
+  }
+  return std::copysign(out, v);
+}
 }  // namespace
 
 class G1RlBridge : public rclcpp::Node {
@@ -61,8 +80,15 @@ public:
     settle_s_ = declare_parameter("fixstand_settle_s", 15.0);
     vx_min_ = declare_parameter("vx_min", -0.5);
     vx_max_ = declare_parameter("vx_max", 1.0);
-    vy_max_ = declare_parameter("vy_max", 0.3);
-    wz_max_ = declare_parameter("wz_max", 0.2);
+    vy_max_ = declare_parameter("vy_max", 0.5);
+    wz_max_ = declare_parameter("wz_max", 1.0);
+    // Measured steady tracking; the 0.01 entry jumps straight to the dead zone's edge.
+    vx_want_ = declare_parameter("vx_want", std::vector<double>{0.0, 0.01, 0.109, 0.161, 0.305, 0.397});
+    vx_cmd_ = declare_parameter("vx_cmd", std::vector<double>{0.0, 0.2, 0.25, 0.3, 0.4, 0.5});
+    vy_want_ = declare_parameter("vy_want", std::vector<double>{0.0, 0.01, 0.197, 0.345});
+    vy_cmd_ = declare_parameter("vy_cmd", std::vector<double>{0.0, 0.2, 0.3, 0.5});
+    wz_want_ = declare_parameter("wz_want", std::vector<double>{0.0, 0.01, 0.048, 0.156, 0.414});
+    wz_cmd_ = declare_parameter("wz_cmd", std::vector<double>{0.0, 0.2, 0.3, 0.6, 1.0});
     spawn_x_ = declare_parameter("spawn_x", 0.0);
     spawn_y_ = declare_parameter("spawn_y", 0.0);
     spawn_yaw_ = declare_parameter("spawn_yaw", 0.0);
@@ -113,12 +139,13 @@ private:
     {
       std::lock_guard<std::mutex> l(mutex_);
       yaw_ = rpy[2];
+      wz_meas_ = in.imu_state().gyroscope()[2];
       have_yaw_ = true;
       const std::chrono::duration<double> age = std::chrono::steady_clock::now() - last_cmd_;
       if (ready_ && age.count() < cmd_timeout_) {
-        vx = clampf(vx_, vx_min_, vx_max_);
-        vy = clampf(vy_, -vy_max_, vy_max_);
-        wz = clampf(wz_, -wz_max_, wz_max_);
+        vx = clampf(compensate(vx_, vx_want_, vx_cmd_), vx_min_, vx_max_);
+        vy = clampf(compensate(vy_, vy_want_, vy_cmd_), -vy_max_, vy_max_);
+        wz = clampf(compensate(wz_, wz_want_, wz_cmd_), -wz_max_, wz_max_);
       }
     }
     const uint16_t keys = keys_.load();
@@ -144,7 +171,7 @@ private:
 
   void publish_odom() {
     std::array<float, 2> p, v;
-    double yaw, z;
+    double yaw, z, wz;
     {
       std::lock_guard<std::mutex> l(mutex_);
       if (!have_pos_ || !have_yaw_) return;
@@ -152,6 +179,7 @@ private:
       v = vel_;
       yaw = yaw_;
       z = z_;
+      wz = wz_meas_;
     }
     if (!origin_set_) {
       origin_ = p;
@@ -178,6 +206,7 @@ private:
     // World velocity to body frame.
     o.twist.twist.linear.x = std::cos(yaw) * v[0] + std::sin(yaw) * v[1];
     o.twist.twist.linear.y = -std::sin(yaw) * v[0] + std::cos(yaw) * v[1];
+    o.twist.twist.angular.z = wz;
     odom_pub_->publish(o);
 
     geometry_msgs::msg::TransformStamped t;
@@ -214,10 +243,11 @@ private:
   }
 
   double cmd_timeout_, settle_s_, vx_min_, vx_max_, vy_max_, wz_max_, spawn_x_, spawn_y_, spawn_yaw_;
+  std::vector<double> vx_want_, vx_cmd_, vy_want_, vy_cmd_, wz_want_, wz_cmd_;
   std::string odom_frame_, base_frame_;
 
   std::mutex mutex_;
-  double vx_ = 0, vy_ = 0, wz_ = 0, yaw_ = 0, yaw0_ = 0;
+  double vx_ = 0, vy_ = 0, wz_ = 0, yaw_ = 0, yaw0_ = 0, wz_meas_ = 0;
   std::array<float, 2> pos_{}, vel_{}, origin_{};
   float z_ = 0;
   bool have_pos_ = false, have_yaw_ = false, origin_set_ = false, ready_ = false;
