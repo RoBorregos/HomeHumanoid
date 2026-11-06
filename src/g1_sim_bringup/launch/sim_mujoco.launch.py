@@ -1,60 +1,93 @@
 """Track B: Nav2 driving the G1's RL walking policy in unitree_mujoco.
 
-M2b scaffold. Unlike sim_gz.launch.py, the simulator (unitree_mujoco) and the
-RL policy controller (unitree_rl_lab's g1_ctrl) are NOT ROS 2 nodes — they are
-external processes started by hand (or from a separate script) before running
-this launch file. Config is via simulate/config.yaml, not CLI flags — see
-third_party/README.md:
+unitree_mujoco and unitree_rl_lab's g1_ctrl are not ROS 2 nodes, so start them
+first (scripts/start_mujoco.sh in this package). This file brings up the ROS 2
+side: g1_rl_bridge, a map, and Nav2.
 
-    cd third_party/unitree_mujoco/simulate/build && ./unitree_mujoco
-    cd third_party/unitree_rl_lab/deploy/robots/g1_29dof/build && ./g1_ctrl --network lo
+The MuJoCo scene has no arena and no lidar, so the robot walks on an empty plane
+while Nav2 plans on the map: this validates cmd_vel -> walking -> odom, not
+obstacle avoidance or localization. See nav2_g1_mujoco_overlay.yaml.
 
-This launch file only brings up the ROS 2 side: the g1_base_bridge node in
-rl_policy mode (see docs/plan.md, "M1 findings", for the confirmed
-rt/lowstate wireless_remote mechanism it uses) and Nav2. Odometry is NOT yet
-wired — G1's SportModeState_ (unitree_hg) only carries fsm_id/fsm_mode/
-task_id/task_time, no position/velocity, unlike go2's; the real odometry
-source for TF/nav_msgs/Odometry still needs to be identified (likely IMU
-orientation + leg kinematics/state estimator — open question, see
-docs/plan.md).
+Everything runs on wall time: nothing publishes /clock on this track.
 """
 
+import os
+import tempfile
+
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
-    nav2_params_arg = DeclareLaunchArgument(
-        "nav2_params_file",
-        default_value=PathJoinSubstitution(
-            [
-                get_package_share_directory("g1_nav_overlay"),
-                "config",
-                "nav2_g1.yaml",
-            ]
-        ),
-        description="Nav2 overlay adapted to the G1's footprint",
-    )
+def _deep_merge(base, overlay):
+    """Recursively merge overlay dict into base dict (overlay wins)."""
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
 
-    base_bridge = Node(
-        package="g1_base_bridge",
-        executable="g1_base_bridge",
-        name="g1_base_bridge",
+
+def launch_setup(context, *args, **kwargs):
+    overlay_share = get_package_share_directory("g1_nav_overlay")
+    map_name = LaunchConfiguration("map_name").perform(context)
+    spawn = {k: float(LaunchConfiguration(k).perform(context)) for k in ("spawn_x", "spawn_y", "spawn_yaw")}
+
+    with open(os.path.join(overlay_share, "config", "nav2_g1.yaml")) as f:
+        params = yaml.safe_load(f)
+    with open(os.path.join(overlay_share, "config", "nav2_g1_mujoco_overlay.yaml")) as f:
+        _deep_merge(params, yaml.safe_load(f))
+    merged = os.path.join(tempfile.gettempdir(), "nav2_g1_mujoco_merged.yaml")
+    with open(merged, "w") as f:
+        yaml.safe_dump(params, f, default_flow_style=False, sort_keys=False)
+
+    bridge = Node(
+        package="g1_rl_bridge",
+        executable="g1_rl_bridge",
         output="screen",
-        parameters=[{"backend": "rl_policy"}],
+        parameters=[spawn, {"dds_network_interface": "lo", "dds_domain_id": 0}],
     )
-
-    nav2_bringup = IncludeLaunchDescription(
+    map_to_odom = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        arguments=["--frame-id", "map", "--child-frame-id", "odom"],
+    )
+    map_server = Node(
+        package="nav2_map_server",
+        executable="map_server",
+        output="screen",
+        parameters=[{
+            "yaml_filename": os.path.join(
+                get_package_share_directory("map_context"), "maps", f"{map_name}.yaml"
+            ),
+        }],
+    )
+    map_lifecycle = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_map",
+        output="screen",
+        parameters=[{"autostart": True, "node_names": ["map_server"]}],
+    )
+    nav2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution(
-                [get_package_share_directory("nav2_bringup"), "launch", "navigation_launch.py"]
-            )
+            os.path.join(get_package_share_directory("nav2_bringup"), "launch", "navigation_launch.py")
         ),
-        launch_arguments={"params_file": LaunchConfiguration("nav2_params_file")}.items(),
+        launch_arguments={"params_file": merged, "use_sim_time": "false", "autostart": "true"}.items(),
     )
+    return [bridge, map_to_odom, map_server, map_lifecycle, TimerAction(period=4.0, actions=[nav2])]
 
-    return LaunchDescription([nav2_params_arg, base_bridge, nav2_bringup])
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument("map_name", default_value="robocup2026_1"),
+        DeclareLaunchArgument("spawn_x", default_value="4.17764"),
+        DeclareLaunchArgument("spawn_y", default_value="-11.69743"),
+        DeclareLaunchArgument("spawn_yaw", default_value="-1.989"),
+        OpaqueFunction(function=launch_setup),
+    ])

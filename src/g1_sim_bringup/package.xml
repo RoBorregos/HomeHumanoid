@@ -17,6 +17,8 @@
 
   <exec_depend>g1_description</exec_depend>
   <exec_depend>g1_base_bridge</exec_depend>
+  <exec_depend>g1_rl_bridge</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>g1_nav_overlay</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>

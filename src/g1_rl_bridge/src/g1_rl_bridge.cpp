@@ -131,18 +131,20 @@ private:
     std::lock_guard<std::mutex> l(mutex_);
     pos_ = {s.position()[0], s.position()[1]};
     vel_ = {s.velocity()[0], s.velocity()[1]};
+    z_ = s.position()[2];
     have_pos_ = true;
   }
 
   void publish_odom() {
     std::array<float, 2> p, v;
-    double yaw;
+    double yaw, z;
     {
       std::lock_guard<std::mutex> l(mutex_);
       if (!have_pos_ || !have_yaw_) return;
       p = pos_;
       v = vel_;
       yaw = yaw_;
+      z = z_;
     }
     if (!origin_set_) {
       origin_ = p;
@@ -163,6 +165,7 @@ private:
     o.child_frame_id = base_frame_;
     o.pose.pose.position.x = x;
     o.pose.pose.position.y = y;
+    o.pose.pose.position.z = z;  // Height of the IMU, shows a fall. Not used in the TF.
     o.pose.pose.orientation.z = std::sin(th / 2);
     o.pose.pose.orientation.w = std::cos(th / 2);
     // World velocity to body frame.
@@ -209,6 +212,7 @@ private:
   std::mutex mutex_;
   double vx_ = 0, vy_ = 0, wz_ = 0, yaw_ = 0, yaw0_ = 0;
   std::array<float, 2> pos_{}, vel_{}, origin_{};
+  float z_ = 0;
   bool have_pos_ = false, have_yaw_ = false, origin_set_ = false, ready_ = false;
   std::chrono::steady_clock::time_point last_cmd_{};
   std::atomic<uint16_t> keys_{0};
