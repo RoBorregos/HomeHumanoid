@@ -20,6 +20,11 @@
 // Errors come from foot slip and yaw drift; there is no loop closure, so on the
 // real robot this is meant to be corrected by a localizer.
 //
+// Needs a foot on the ground from the first sample: with the robot lifted (the
+// MuJoCo elastic band, or held on the real robot) the lowest point swings in the
+// air and is still taken as fixed, which drifts fast. reset() starts over at the
+// initial pose, for once the robot stands.
+//
 // Assumes flat ground: a pivot on a step would be anchored at the wrong height,
 // which only affects z, not the planar pose.
 //
@@ -62,6 +67,11 @@ public:
   explicit LegOdometry(const Params & p) : p_(p) {}
 
   bool initialized() const { return init_; }
+  // Starts over at the initial pose on the next sample.
+  void reset() {
+    init_ = false;
+    pose_ = Pose();
+  }
   const Pose & pose() const { return pose_; }
 
   // Returns false if the sample was unusable (IMU not filled in yet).

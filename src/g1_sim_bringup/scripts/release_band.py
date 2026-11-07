@@ -10,11 +10,22 @@ import subprocess
 import time
 
 from nav_msgs.msg import Odometry
+from std_srvs.srv import Trigger
 import rclpy
 from rclpy.node import Node
 
 SETTLE_S = 5.0
 MIN_STANDING_Z = 0.7
+
+
+def reset_leg_odom(node):
+    # With odom_source:=leg the estimate drifted while the feet hung in the air.
+    client = node.create_client(Trigger, "/g1_rl_bridge/reset_odom")
+    if not client.wait_for_service(timeout_sec=2.0):
+        return  # odom_source:=ground_truth, nothing to reset.
+    future = client.call_async(Trigger.Request())
+    rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+    print(future.result().message if future.result() else "reset_odom timed out")
 
 
 def main():
@@ -72,6 +83,8 @@ def main():
     spin(SETTLE_S)
     print(f"released, z={state['z']:.3f}")
     ok = state["z"] > MIN_STANDING_Z
+    if ok:
+        reset_leg_odom(node)
     rclpy.shutdown()
     raise SystemExit(0 if ok else 1)
 

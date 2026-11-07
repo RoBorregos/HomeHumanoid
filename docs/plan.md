@@ -68,14 +68,15 @@ Use `slam_toolbox` (matches home2's current default, which is itself moving away
 
 - **M0 — Workspace scaffold.** Create the ROS 2 Jazzy workspace, Docker mirroring home2's `run.sh`/`Dockerfile.ROS` pattern (cpu/cuda variants; l4t for the Orin later), add home2 as a submodule, confirm `colcon build` of the vendored packages. Deliverable: buildable workspace + CI that builds the submodule.
 - **M1 — G1 standing/teleop in MuJoCo (no ROS 2 yet). Done, including visual confirmation (see "M1 findings" above).** Built `unitree_mujoco` + `unitree_rl_lab`'s `g1_ctrl` on the Orin against a locally-installed `unitree_sdk2` (two installs were needed: one at `/opt/unitree_robotics` per `unitree_mujoco`'s README, one at the default `/usr/local` prefix per `unitree_rl_lab`'s README, since their CMakeLists hardcode different paths). No physical gamepad was available and this Jetson kernel has no `uinput`, so FSM transitions were driven via the `rt/lowstate` relay-with-override pattern instead. Deliverable: screenshots (not a video recording) of the G1 actively walking under the RL policy in MuJoCo, captured headlessly via Xvfb after the Orin's RDP session broke post-reboot.
-- **M2a — Full Track A navigation stack: map it, tag it, navigate it. Implemented, pending `vendor/home2` submodule + colcon build + a run on the Orin to validate.** Scope grew from "goal-following against a pre-built map" to parity with what `home2` does for FRIDA: mapping, area/location tagging, and autonomous goal-reaching, all built on one shared Gazebo foundation. Key design, confirmed against `home2`'s real source (not guessed):
+- **M2a — Full Track A navigation stack: map it, tag it, navigate it. Implemented and validated on the Orin (see the "M2a continued" sections below: 9 of 10, then all tour goals SUCCEEDED).** Scope grew from "goal-following against a pre-built map" to parity with what `home2` does for FRIDA: mapping, area/location tagging, and autonomous goal-reaching, all built on one shared Gazebo foundation. Key design, confirmed against `home2`'s real source (not guessed):
   - `g1_description/urdf/g1.urdf.xacro` wraps a vendored `unitree_ros` G1 URDF (`scripts/vendor_g1.sh` — gitignored output, run on any machine that builds this package): `VelocityControl` + `OdometryPublisher` Gazebo plugins on `pelvis` (G1's real root link — **not** `base_link`), a `gpu_lidar` on the pre-existing `mid360_link` mount point, and the 29 leg/waist/arm joints locked `revolute` -> `fixed` for Track A's static idle stance.
   - `g1_base_bridge`'s Track A now has a watchdog (ported from home2's `cmd_vel_relay.py`) zeroing the Twist if Nav2 stops sending `cmd_vel` — Gazebo's `VelocityControl` holds the last command forever otherwise.
   - `g1_nav_overlay/config/nav2_g1.yaml` + `nav2_g1_sim_overlay.yaml` port `nav2_omni.yaml`'s MPPI/critics structure from home2, deep-merged at launch (same pattern as `nav2_omni.launch.py`'s `_deep_merge()`) and fed to **stock `nav2_bringup`'s `navigation_launch.py`** (not home2's composable-node container — `autostart:true` there does for free what home2 relies on `nav_central.py`, out of scope here, to trigger).
   - `g1_sim_bringup/launch/sim_gz.launch.py` (Fase 4, navigate) and `sim_mapping.launch.py` (Fase 2, map) share the same world/spawn/bridge setup, defaulting to `home2`'s existing `robocup2026_1` map + `arena_robocup2026_1.sdf` world as a first smoke test (no new world-building needed). `localization.launch.py` and `slam.launch.py` from `vendor/home2/navigation/packages/nav_main` are included **unmodified** — both confirmed robot-agnostic by reading their source.
   - Fase 3 (tag) reuses `vendor/home2/navigation/packages/map_context/scripts/map_area_tagger.py` **unmodified** — a standalone PyQt5 app with no ROS/FRIDA coupling, loads a `.pgm`/`.yaml`, exports `areas.json`.
   - See `docs/plan.md`'s own history is superseded here by the fuller ephemeral plan this was implemented from; the concrete file list and design rationale live in git history / the implementation itself.
-- **M2b — Real locomotion (Track B, MuJoCo + RL policy).** Not started. Extend `g1_base_bridge`'s `rl_policy` backend's `cmd_vel` handling to drive actual walking via Nav2; the `SportModeState` odometry gap (G1's `unitree_hg` variant carries no position/velocity, confirmed in M1) is still unresolved and blocks TF/`nav_msgs/Odometry` wiring for this track specifically — not a problem for M2a's Track A, which gets perfect ground-truth odometry for free from Gazebo's `OdometryPublisher` plugin.
+- **M2b — Real locomotion (Track B, MuJoCo + RL policy). Done in simulation, see "M2b — Track B implemented" below; it is `g1_rl_bridge`, not `g1_base_bridge`, and odometry is still MuJoCo ground truth.** Extend `g1_base_bridge` to target `unitree_rl_lab`'s command interface instead of `VelocityControl`; wire odometry from `SportModeState` into TF/`nav_msgs/Odometry`. Deliverable: the same goal-following demo, but the G1 actually walks via the RL policy in MuJoCo, driven end-to-end by Nav2.
+- **M3 — SLAM-built map + autonomous exploration.** Simulate the Livox MID-360 (via `pointcloud_to_laserscan`) and/or the D435i on whichever backend proved more stable in M2; run `slam_toolbox` in mapping mode, save a map, rerun Nav2 against it. Deliverable: the G1 autonomously maps and navigates a simulated scenario from scratch.
 - **M4 — Integration with home2's `task_manager`/vision/HRI.** Wire `task_manager`'s orchestration (first confirm its internal mechanism: BT, state machine, or LLM planner) to emit nav goals to the G1 stack instead of FRIDA's; bring in vision (YOLO/VLM) and HRI (STT/NLP) unmodified, confirming they're robot-agnostic. Deliverable: a GPSR-style demo ("go to X, find Y") running on the G1 sim stack.
 - **M5 — Sim-to-real toward the physical G1.** Since the hardware is already owned, this phase is in scope for this cycle: replace MuJoCo with real `unitree_sdk2`/DDS on the robot, validate the same `g1_base_bridge` and Nav2 configs against real sensor data and real locomotion latency/safety margins.
 
@@ -117,64 +118,6 @@ HomeHumanoid/
 - M4: run a sample GPSR-style task end-to-end and confirm vision/HRI/task_manager required no code changes, only robot configuration.
 - M5: physical safety checklist (clear area, accessible emergency stop, conservative velocity limits) before any test on the real G1.
 
-## M2a continued — third Orin session (2026-11-05): root causes for findings 4, 5 and 8
-
-**This section supersedes the root-cause claims in findings 4, 5 and 8 above.**
-
-- **The ~0.003 `real_time_factor` was never an EGL or `ros2 launch` problem.** `spawn_z` defaulted to 0, burying the locked legs' collision meshes in the floor, so each physics step cost ~290ms. Raising the live model to z=0.79 with `set_pose` took RTF from 0.0034 to 1.00 immediately, and forcing the NVIDIA EGL vendor beforehand had not changed it. RTF is also 1.0 with `start_gazebo:=true`, inside the combined launch tree, even with the `dri2` warnings present. The launch-file comments about an EGL bug and the `start_gazebo:=false` workaround are therefore obsolete (not yet cleaned up). `spawn_z` now defaults to 0.79.
-- **Finding 8 (no plans beyond ~1m) disappeared with a healthy sim.** At spawn_z 0.79, `map -> pelvis` matched the spawn pose and goals planned at up to 6.76m. `NavigateToPose` to `exit` (3.28, -6.13) returned SUCCEEDED with 0 recoveries, ending 0.12m from the goal by Gazebo ground truth. That is one goal, on the URDF that still had collisions.
-- **New bug: collisions tip the kinematic base over, which silently breaks dead-reckoned `/odom`.** During a multi-goal tour the model ended at z=1.52 with roll ~70deg, and localization was 1.4m off. A/B with no sensor, same 25s drive command: 37 collisions ended at pitch 82deg, z=0.23; zero collisions stayed level at z=0.79, RTF 1.0. `vendor_g1.sh` now strips all `<collision>` blocks. **Not yet validated: Nav2 goals on the zero-collision model**, because of the GPU problem below.
-- **GPU wedge (kernel, needs a reboot).** Starting with one `gz sim` during that tour, the render thread of every later GPU client is stuck in uninterruptible `D` state at `nvgpu_fifo_preempt_tsg`, including a plain `eglinfo`. Symptom: with a sensor model, Gazebo sleeps at 0 CPU with no `/clock` and logs `SceneBroadcaster: Timed out waiting for state`; a world with no sensors runs fine. Cause of the wedge is unknown (`dmesg` needs root). It looks like a URDF or launch bug but is not: the original 37-collision URDF hangs the same way. Check `wchan` of the `ruby` threads before debugging this symptom. Software rendering is not a fallback: Mesa llvmpipe segfaults in `driCreateNewScreen3`, both surfaceless and under Xvfb.
-- **Next, after a reboot:** run the five-location tour (kitchen, living_room, exit, inspection_point, start_location) on the zero-collision model, comparing `map -> pelvis` with Gazebo ground truth at each stop.
-
-## M2a continued — after the reboot (2026-11-05): tour results on the zero-collision model
-
-**Corrects the previous section: finding 8 had not fully disappeared.** A healthy sim removed most of it, but NavFn with `use_astar: true` still failed with "Failed to create a plan from potential when a legal potential was found". Same pose and goal: A* failed 3/3, Dijkstra planned. `nav2_g1.yaml` now sets `use_astar: false`.
-
-Two-lap tour with `start_gazebo:=true` and Dijkstra, checked against Gazebo ground truth: **9 of 10 goals SUCCEEDED**, z stayed at 0.79 with no tipping, RTF ~1.0. This also confirms the launch tree is not an RTF problem.
-
-**Still open (intermittent, not root-caused):**
-- `exit` aborted once with `NO_VALID_PATH` (208) and 15 recoveries: the planner found no path from around (1.7, -9.6) with "Failed to create plan with tolerance". The same goal passed cleanly on lap 2.
-- `inspection_point` succeeded on both laps but needed 9 recoveries, with the same planner warning, and stopped ~0.4m from the goal by ground truth (over `xy_goal_tolerance` 0.35, though within it by `map -> pelvis`).
-- Next check: inspect the live `/global_costmap/costmap` at a failure. Candidates, untested: narrow passages closed by robot_radius + inflation, or scan marks from a lidar now ~1.25m high versus a map built at FRIDA's lidar height.
-
-Stop the stack with SIGINT and wait; a straggler node can survive (seen: `waypoint_follower`), so check by PID. Avoid SIGKILL on `gz sim`: unproven as the cause of the GPU wedge, but it has not recurred in this session's graceful restart.
-
-## M2b — Track B implemented: Nav2 walks the G1 in MuJoCo (2026-11-06)
-
-**Result:** three laps over 4 locations of `robocup2026_1`, driven by `NavigateToPose` with the RL policy walking on its legs: **11 of 12 goals SUCCEEDED**, about 14 minutes, no falls. The other goal (`kitchen`) arrived 0.29m away but ran out of time on the final turn. Run this with RViz closed: see "Falls" below.
-
-**This does not validate obstacle avoidance or localization.** The MuJoCo scene has no arena and no lidar: the robot walks on an empty plane while Nav2 plans on the map, using the static map as its only view of the walls, with a fixed `map -> odom`. `/odom` comes from MuJoCo's own ground-truth pose. What it proves is the loop `Nav2 -> cmd_vel -> walking -> odom`.
-
-**To run it:**
-```bash
-DISPLAY=:10 src/g1_sim_bringup/scripts/start_mujoco.sh
-ros2 launch g1_sim_bringup sim_mujoco.launch.py
-# Once g1_rl_bridge logs "accepting cmd_vel":
-DISPLAY=:10 python3 src/g1_sim_bringup/scripts/release_band.py
-```
-
-**What changed, and why:**
-- **New package `g1_rl_bridge` (C++, replaces the Python `rl_policy` backend).** The relay was validated in C++, and Python at 1kHz was a risk. It also marks relayed samples in `wireless_remote[0]`, since the relay receives its own writes.
-- **The axis mapping in the old plan and bridge was wrong.** From `unitree_rl_lab`'s `velocity_commands` observation: `vx = ly`, `vy = -lx`, `wz = -rx`. The values are direct m/s and rad/s, with no joystick scale.
-- **Odometry exists in sim (resolves open question 5 for MuJoCo only).** `unitree_mujoco` publishes the IMU site's world pose on `rt/sportmodestate` using the go2 message type, even for the G1. The real robot still needs its own source.
-- **The policy doesn't track linearly.** Measured: 0.2 m/s forward gives nothing, 0.2 rad/s gives 0.02 rad/s. `g1_rl_bridge` compensates each axis with a measured table; 0.2 and 0.3 m/s then track at 0.200 and 0.300.
-- **`deploy.yaml` ships the curriculum's starting ranges.** `start_mujoco.sh` widens them (`ang_vel_z` to 1.0, `lin_vel_y` to 0.5), editing the local `third_party/unitree_rl_lab` clone. Without this the robot can't turn. It reaches about 0.41 rad/s.
-- **Regulated Pure Pursuit instead of MPPI on this track.** Combining forward and turning couples into sideways drift (0.4 m/s with 0.4 rad/s gave 0.21 m/s to the side), which took MPPI off the path into cells it couldn't recover from. RPP turns on the spot, then walks. Details in `nav2_g1_mujoco_overlay.yaml`.
-
-**Shared fixes, validated on Track A too:**
-- **Stale commands:** during one Track A run `/cmd_vel` kept repeating (-0.3, 0.215, 0) at 20Hz with nothing feeding `collision_monitor`, and the robot drove off the map because an arrival-time watchdog never fired. Both bridges now drop commands whose stamp is older than `cmd_vel_timeout`. Fault injection on Track A: stale commands moved it 0.000m, fresh ones 1.178m, and cutting them left it still. What started that repetition was not identified.
-- **`default_server_timeout: 200`:** Nav2's 20ms default lost action acknowledgements under load and aborted whole goals with no recovery.
-- Track A after all of this: three laps over 5 locations, all goals SUCCEEDED, robot stationary when idle.
-
-**Falls (open):** the robot fell twice, both on the `exit -> start_location` leg with RViz open, about 5 to 6 minutes in. It stumbled during a constant, gentle command (0.25 m/s, no turn). It didn't fall in 7 minutes without Nav2, nor in the 14-minute tour with RViz closed, which frees about 170% CPU. That points at CPU load, likely `g1_ctrl`'s timing, but it is a correlation over few runs. The real-time-factor log meant to confirm it came out empty.
-
-**Still open for the real robot:**
-- Use `g1::LocoClient::SetVelocity` rather than the joystick relay; its `duration` argument is a built-in stop. Not written yet.
-- Identify the real odometry source, and generate `/scan` from the real MID-360. There is no real-robot bringup.
-- The compensation tables are specific to this policy in MuJoCo: they must not be reused on the robot without re-measuring.
-- `robot_radius: 0.2` in this overlay is tuned for a sim without physical walls, and is not a safe value near real obstacles.
-- Comments about an EGL bug in `sim_gz.launch.py` and `sim_mapping.launch.py`, and the `start_gazebo:=false` default, are obsolete but not cleaned up.
 ## M2a (Fase 4 smoke test) findings — Orin validation session
 
 Validating the full Fase 4 stack (Gazebo + Nav2 + slam_toolbox localization +
@@ -434,3 +377,62 @@ on top of it, nav2 freshly restarted per finding 7's fix) was left running
 on the Orin for inspection — kill by PID (`gz sim`, `ros2 launch`, all
 `nav2_*`/`opennav_docking`/`slam_toolbox` processes) before starting a new
 attempt from scratch.
+
+## M2a continued — third Orin session (2026-11-05): root causes for findings 4, 5 and 8
+
+**This section supersedes the root-cause claims in findings 4, 5 and 8 above.**
+
+- **The ~0.003 `real_time_factor` was never an EGL or `ros2 launch` problem.** `spawn_z` defaulted to 0, burying the locked legs' collision meshes in the floor, so each physics step cost ~290ms. Raising the live model to z=0.79 with `set_pose` took RTF from 0.0034 to 1.00 immediately, and forcing the NVIDIA EGL vendor beforehand had not changed it. RTF is also 1.0 with `start_gazebo:=true`, inside the combined launch tree, even with the `dri2` warnings present. The launch-file comments about an EGL bug and the `start_gazebo:=false` workaround are therefore obsolete (not yet cleaned up). `spawn_z` now defaults to 0.79.
+- **Finding 8 (no plans beyond ~1m) disappeared with a healthy sim.** At spawn_z 0.79, `map -> pelvis` matched the spawn pose and goals planned at up to 6.76m. `NavigateToPose` to `exit` (3.28, -6.13) returned SUCCEEDED with 0 recoveries, ending 0.12m from the goal by Gazebo ground truth. That is one goal, on the URDF that still had collisions.
+- **New bug: collisions tip the kinematic base over, which silently breaks dead-reckoned `/odom`.** During a multi-goal tour the model ended at z=1.52 with roll ~70deg, and localization was 1.4m off. A/B with no sensor, same 25s drive command: 37 collisions ended at pitch 82deg, z=0.23; zero collisions stayed level at z=0.79, RTF 1.0. `vendor_g1.sh` now strips all `<collision>` blocks. **Not yet validated: Nav2 goals on the zero-collision model**, because of the GPU problem below.
+- **GPU wedge (kernel, needs a reboot).** Starting with one `gz sim` during that tour, the render thread of every later GPU client is stuck in uninterruptible `D` state at `nvgpu_fifo_preempt_tsg`, including a plain `eglinfo`. Symptom: with a sensor model, Gazebo sleeps at 0 CPU with no `/clock` and logs `SceneBroadcaster: Timed out waiting for state`; a world with no sensors runs fine. Cause of the wedge is unknown (`dmesg` needs root). It looks like a URDF or launch bug but is not: the original 37-collision URDF hangs the same way. Check `wchan` of the `ruby` threads before debugging this symptom. Software rendering is not a fallback: Mesa llvmpipe segfaults in `driCreateNewScreen3`, both surfaceless and under Xvfb.
+- **Next, after a reboot:** run the five-location tour (kitchen, living_room, exit, inspection_point, start_location) on the zero-collision model, comparing `map -> pelvis` with Gazebo ground truth at each stop.
+
+## M2a continued — after the reboot (2026-11-05): tour results on the zero-collision model
+
+**Corrects the previous section: finding 8 had not fully disappeared.** A healthy sim removed most of it, but NavFn with `use_astar: true` still failed with "Failed to create a plan from potential when a legal potential was found". Same pose and goal: A* failed 3/3, Dijkstra planned. `nav2_g1.yaml` now sets `use_astar: false`.
+
+Two-lap tour with `start_gazebo:=true` and Dijkstra, checked against Gazebo ground truth: **9 of 10 goals SUCCEEDED**, z stayed at 0.79 with no tipping, RTF ~1.0. This also confirms the launch tree is not an RTF problem.
+
+**Still open (intermittent, not root-caused):**
+- `exit` aborted once with `NO_VALID_PATH` (208) and 15 recoveries: the planner found no path from around (1.7, -9.6) with "Failed to create plan with tolerance". The same goal passed cleanly on lap 2.
+- `inspection_point` succeeded on both laps but needed 9 recoveries, with the same planner warning, and stopped ~0.4m from the goal by ground truth (over `xy_goal_tolerance` 0.35, though within it by `map -> pelvis`).
+- Next check: inspect the live `/global_costmap/costmap` at a failure. Candidates, untested: narrow passages closed by robot_radius + inflation, or scan marks from a lidar now ~1.25m high versus a map built at FRIDA's lidar height.
+
+Stop the stack with SIGINT and wait; a straggler node can survive (seen: `waypoint_follower`), so check by PID. Avoid SIGKILL on `gz sim`: unproven as the cause of the GPU wedge, but it has not recurred in this session's graceful restart.
+
+## M2b — Track B implemented: Nav2 walks the G1 in MuJoCo (2026-11-06)
+
+**Result:** three laps over 4 locations of `robocup2026_1`, driven by `NavigateToPose` with the RL policy walking on its legs: **11 of 12 goals SUCCEEDED**, about 14 minutes, no falls. The other goal (`kitchen`) arrived 0.29m away but ran out of time on the final turn. Run this with RViz closed: see "Falls" below.
+
+**This does not validate obstacle avoidance or localization.** The MuJoCo scene has no arena and no lidar: the robot walks on an empty plane while Nav2 plans on the map, using the static map as its only view of the walls, with a fixed `map -> odom`. `/odom` comes from MuJoCo's own ground-truth pose. What it proves is the loop `Nav2 -> cmd_vel -> walking -> odom`.
+
+**To run it:**
+```bash
+DISPLAY=:10 src/g1_sim_bringup/scripts/start_mujoco.sh
+ros2 launch g1_sim_bringup sim_mujoco.launch.py
+# Once g1_rl_bridge logs "accepting cmd_vel":
+DISPLAY=:10 python3 src/g1_sim_bringup/scripts/release_band.py
+```
+
+**What changed, and why:**
+- **New package `g1_rl_bridge` (C++, replaces the Python `rl_policy` backend).** The relay was validated in C++, and Python at 1kHz was a risk. It also marks relayed samples in `wireless_remote[0]`, since the relay receives its own writes.
+- **The axis mapping in the old plan and bridge was wrong.** From `unitree_rl_lab`'s `velocity_commands` observation: `vx = ly`, `vy = -lx`, `wz = -rx`. The values are direct m/s and rad/s, with no joystick scale.
+- **Odometry exists in sim (resolves open question 5 for MuJoCo only).** `unitree_mujoco` publishes the IMU site's world pose on `rt/sportmodestate` using the go2 message type, even for the G1. The real robot still needs its own source.
+- **The policy doesn't track linearly.** Measured: 0.2 m/s forward gives nothing, 0.2 rad/s gives 0.02 rad/s. `g1_rl_bridge` compensates each axis with a measured table; 0.2 and 0.3 m/s then track at 0.200 and 0.300.
+- **`deploy.yaml` ships the curriculum's starting ranges.** `start_mujoco.sh` widens them (`ang_vel_z` to 1.0, `lin_vel_y` to 0.5), editing the local `third_party/unitree_rl_lab` clone. Without this the robot can't turn. It reaches about 0.41 rad/s.
+- **Regulated Pure Pursuit instead of MPPI on this track.** Combining forward and turning couples into sideways drift (0.4 m/s with 0.4 rad/s gave 0.21 m/s to the side), which took MPPI off the path into cells it couldn't recover from. RPP turns on the spot, then walks. Details in `nav2_g1_mujoco_overlay.yaml`.
+
+**Shared fixes, validated on Track A too:**
+- **Stale commands:** during one Track A run `/cmd_vel` kept repeating (-0.3, 0.215, 0) at 20Hz with nothing feeding `collision_monitor`, and the robot drove off the map because an arrival-time watchdog never fired. Both bridges now drop commands whose stamp is older than `cmd_vel_timeout`. Fault injection on Track A: stale commands moved it 0.000m, fresh ones 1.178m, and cutting them left it still. What started that repetition was not identified.
+- **`default_server_timeout: 200`:** Nav2's 20ms default lost action acknowledgements under load and aborted whole goals with no recovery.
+- Track A after all of this: three laps over 5 locations, all goals SUCCEEDED, robot stationary when idle.
+
+**Falls (open):** the robot fell twice, both on the `exit -> start_location` leg with RViz open, about 5 to 6 minutes in. It stumbled during a constant, gentle command (0.25 m/s, no turn). It didn't fall in 7 minutes without Nav2, nor in the 14-minute tour with RViz closed, which frees about 170% CPU. That points at CPU load, likely `g1_ctrl`'s timing, but it is a correlation over few runs. The real-time-factor log meant to confirm it came out empty.
+
+**Still open for the real robot:**
+- Use `g1::LocoClient::SetVelocity` rather than the joystick relay; its `duration` argument is a built-in stop. Not written yet.
+- Identify the real odometry source, and generate `/scan` from the real MID-360. There is no real-robot bringup.
+- The compensation tables are specific to this policy in MuJoCo: they must not be reused on the robot without re-measuring.
+- `robot_radius: 0.2` in this overlay is tuned for a sim without physical walls, and is not a safe value near real obstacles.
+- Comments about an EGL bug in `sim_gz.launch.py` and `sim_mapping.launch.py`, and the `start_gazebo:=false` default, are obsolete but not cleaned up.

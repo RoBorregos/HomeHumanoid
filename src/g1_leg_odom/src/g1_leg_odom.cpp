@@ -8,6 +8,7 @@
 #include <mutex>
 
 #include <rclcpp/rclcpp.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "g1_leg_odom/leg_odometry.hpp"
@@ -34,6 +35,15 @@ public:
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     tf_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+    reset_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/reset_odom", [this](std_srvs::srv::Trigger::Request::ConstSharedPtr,
+                             std_srvs::srv::Trigger::Response::SharedPtr res) {
+        std::lock_guard<std::mutex> l(mutex_);
+        odom_.reset();
+        res->success = true;
+        res->message = "leg odometry reset to the initial pose";
+        RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
+      });
     timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / rate), [this] { publish(); });
 
     unitree::robot::ChannelFactory::Instance()->Init(domain, iface);
@@ -89,6 +99,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_srv_;
   unitree::robot::ChannelSubscriberPtr<LowState> sub_;
 };
 

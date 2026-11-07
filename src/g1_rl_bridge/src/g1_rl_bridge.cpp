@@ -46,6 +46,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "g1_leg_odom/leg_odometry.hpp"
@@ -135,7 +136,20 @@ public:
         last_cmd_ = std::chrono::steady_clock::now();
       });
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(use_leg_ ? "/odom_ground_truth" : "/odom", 10);
-    if (use_leg_) leg_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    if (use_leg_) {
+      leg_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+      // The estimate drifts while the elastic band holds the robot up, so
+      // release_band.py calls this once the feet carry the weight.
+      reset_srv_ = create_service<std_srvs::srv::Trigger>(
+        "~/reset_odom", [this](std_srvs::srv::Trigger::Request::ConstSharedPtr,
+                               std_srvs::srv::Trigger::Response::SharedPtr res) {
+          std::lock_guard<std::mutex> l(mutex_);
+          leg_odom_->reset();
+          res->success = true;
+          res->message = "leg odometry reset to the spawn pose";
+          RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
+        });
+    }
     tf_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     odom_timer_ = create_wall_timer(20ms, [this] { publish_odom(); });
 
@@ -305,6 +319,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_, leg_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_;
   rclcpp::TimerBase::SharedPtr odom_timer_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_srv_;
   unitree::robot::ChannelPublisherPtr<LowState> pub_;
   unitree::robot::ChannelSubscriberPtr<LowState> sub_;
   unitree::robot::ChannelSubscriberPtr<SportState> sport_sub_;
