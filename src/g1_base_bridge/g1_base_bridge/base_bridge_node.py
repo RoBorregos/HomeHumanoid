@@ -22,6 +22,16 @@ commanded vx/vy/wz is exact — identical to what the plugin would report if
 it worked — so this sidesteps the plugin completely instead of chasing it
 further.
 
+Track B (backend=rl_policy): a hybrid process. In addition to being an rclpy
+node (to receive Nav2's cmd_vel), it opens a unitree_sdk2_python DDS
+participant and relays the robot's real rt/lowstate: every sample received is
+republished immediately, identical except for the embedded `wireless_remote`
+bytes, which are overridden with the current cmd_vel packed as joystick
+axes. This is the mechanism unitree_rl_lab's FSM actually reads (there is no
+separate WirelessController_ topic and no "/command" string topic for G1 —
+see docs/plan.md, "M1 findings", confirmed on the Orin against the real
+unitree_sdk2/unitree_rl_lab sources).
+
 Track A only. Track B (real walking in MuJoCo) lives in the g1_rl_bridge package.
 
 A repeated cmd_vel is not a live one: during one run collision_monitor kept
@@ -31,6 +41,7 @@ Messages whose stamp is older than cmd_vel_timeout are therefore dropped.
 """
 
 import math
+import struct
 import threading
 import time
 
@@ -59,9 +70,9 @@ class G1BaseBridge(Node):
         self.declare_parameter("spawn_x", 0.0)
         self.declare_parameter("spawn_y", 0.0)
         self.declare_parameter("spawn_yaw", 0.0)
+        self.declare_parameter("dds_domain_id", 0)
 
         self.backend = self.get_parameter("backend").value
-        self._cmd_vel_timeout = self.get_parameter("cmd_vel_timeout").value
         cmd_vel_in_topic = self.get_parameter("cmd_vel_in_topic").value
         self.cmd_vel_stamped = self.get_parameter("cmd_vel_stamped").value
 
@@ -92,9 +103,11 @@ class G1BaseBridge(Node):
             odom_freq = self.get_parameter("odom_publish_frequency").value
             self._last_odom_time = self.get_clock().now()
             self.create_timer(1.0 / odom_freq, self._publish_odom)
+<<<<<<< HEAD
+=======
+        elif self.backend == BACKEND_RL_POLICY:
         else:
             raise ValueError(f"unknown backend: {self.backend}")
-
         self.get_logger().info(
             f"g1_base_bridge started (backend={self.backend}, in={cmd_vel_in_topic}, "
             f"stamped={self.cmd_vel_stamped})"
@@ -102,11 +115,14 @@ class G1BaseBridge(Node):
 
     def _on_cmd_vel(self, msg):
         twist = msg.twist if self.cmd_vel_stamped else msg
+<<<<<<< HEAD
         if self.cmd_vel_stamped:
             age = (self.get_clock().now() - Time.from_msg(msg.header.stamp)).nanoseconds * 1e-9
             if age > self._cmd_vel_timeout:
                 self.get_logger().warning(f"Dropping stale cmd_vel, {age:.2f}s old", throttle_duration_sec=2.0)
                 return
+=======
+>>>>>>> origin/Nav2_implementation
         with self._lock:
             self._vx = twist.linear.x
             self._vy = twist.linear.y
@@ -125,6 +141,51 @@ class G1BaseBridge(Node):
         self._gz_pub.publish(Twist())
         with self._lock:
             self._vx = self._vy = self._wz = 0.0
+<<<<<<< HEAD
+=======
+
+    # ---- Track A odometry + TF (see module docstring: Gazebo's
+    # OdometryPublisher plugin stops publishing shortly after spawn on this
+    # build, so this dead-reckons from the same cmd_vel already being
+    # relayed to Gazebo instead) ----
+
+    def _publish_odom(self):
+        now = self.get_clock().now()
+        dt = (now - self._last_odom_time).nanoseconds * 1e-9
+        self._last_odom_time = now
+        with self._lock:
+            vx, vy, wz = self._vx, self._vy, self._wz
+
+        self._odom_yaw += wz * dt
+        self._odom_x += (vx * math.cos(self._odom_yaw) - vy * math.sin(self._odom_yaw)) * dt
+        self._odom_y += (vx * math.sin(self._odom_yaw) + vy * math.cos(self._odom_yaw)) * dt
+        qz = math.sin(self._odom_yaw / 2.0)
+        qw = math.cos(self._odom_yaw / 2.0)
+        stamp = now.to_msg()
+
+        odom = Odometry()
+        odom.header.stamp = stamp
+        odom.header.frame_id = self._odom_frame
+        odom.child_frame_id = self._base_frame
+        odom.pose.pose.position.x = self._odom_x
+        odom.pose.pose.position.y = self._odom_y
+        odom.pose.pose.orientation.z = qz
+        odom.pose.pose.orientation.w = qw
+        odom.twist.twist.linear.x = vx
+        odom.twist.twist.linear.y = vy
+        odom.twist.twist.angular.z = wz
+        self._odom_pub.publish(odom)
+
+        t = TransformStamped()
+        t.header.stamp = stamp
+        t.header.frame_id = self._odom_frame
+        t.child_frame_id = self._base_frame
+        t.transform.translation.x = self._odom_x
+        t.transform.translation.y = self._odom_y
+        t.transform.rotation.z = qz
+        t.transform.rotation.w = qw
+        self._tf_broadcaster.sendTransform(t)
+>>>>>>> origin/Nav2_implementation
 
     # ---- Track A odometry + TF (see module docstring: Gazebo's
     # OdometryPublisher plugin stops publishing shortly after spawn on this
