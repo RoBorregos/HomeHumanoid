@@ -435,4 +435,21 @@ DISPLAY=:10 python3 src/g1_sim_bringup/scripts/release_band.py
 - Identify the real odometry source, and generate `/scan` from the real MID-360. There is no real-robot bringup.
 - The compensation tables are specific to this policy in MuJoCo: they must not be reused on the robot without re-measuring.
 - `robot_radius: 0.2` in this overlay is tuned for a sim without physical walls, and is not a safe value near real obstacles.
-- Comments about an EGL bug in `sim_gz.launch.py` and `sim_mapping.launch.py`, and the `start_gazebo:=false` default, are obsolete but not cleaned up.
+- ~~Comments about an EGL bug in `sim_gz.launch.py` and `sim_mapping.launch.py`, and the `start_gazebo:=false` default, are obsolete but not cleaned up.~~ Cleaned up (2026-11-07): comments now point at the spawn_z root cause, and `start_gazebo` defaults to true. The `DISPLAY`/`EGL_PLATFORM=surfaceless` env is kept.
+
+## Odometry without ground truth: leg-inertial estimator (2026-11-07, in progress)
+
+Open question 5 for the real robot: `/odom` on Track B came from MuJoCo's ground truth (`rt/sportmodestate`), which the G1 doesn't publish. New package **`g1_leg_odom`** estimates the pelvis pose from `rt/lowstate` only (12 leg joint angles + pelvis IMU), so the same code runs in the sim and on the robot.
+
+- **Method:** IMU orientation, re-based to the spawn yaw. Forward kinematics gives the 8 sole contact points (4 per foot). The lowest one is taken as the pivot fixed to the ground, and the anchor moves when another point gets lower by `switch_margin`, keeping the position continuous. Velocity is a low-passed finite difference. Planar output (yaw only) on `/odom` + `odom -> pelvis`.
+- **FK checked against MuJoCo (once, by hand, 2026-11-07):** for 400 random in-range leg poses, `foot_fk` matched MuJoCo's own kinematics of `g1_29dof.xml` to under 1e-5 m (mujoco pip package in a throwaway venv). Not kept as a test, to keep the package free of fixtures; redo it if the leg constants in `leg_odometry.hpp` change.
+- **Sim wiring:** the estimator is header-only and runs inside `g1_rl_bridge` (`odom_source:=leg`, now the default of `sim_mujoco.launch.py`). Ground truth moves to `/odom_ground_truth` without TF, and `scripts/odom_error.py` reports the drift. `odom_source:=ground_truth` restores the old setup.
+- **Why inside the bridge, not as its own node:** on `lo` without multicast, Cyclone DDS gives each participant one of about 10 auto indices per domain, shared with every DDS process on the machine. The home2 speech container's 6 ROS nodes on domain 0 already take most of them, and a 4th Unitree participant failed with "Failed to find a free participant index". The same limit can make `g1_ctrl` fail at startup. Check `ss -ulpn | grep :74` before blaming the sim.
+- **The elastic band breaks it:** while the robot hangs, the lowest point swings in the air and is still treated as fixed; the estimate was 1.2 m off before the robot had moved. `release_band.py` now calls `/g1_rl_bridge/reset_odom` once the feet carry the weight. The robot will have the same problem whenever it is lifted, so call the reset after setting it down.
+- **Not yet measured: drift while walking under Nav2.** That is the result that decides whether this is good enough without a lidar localizer.
+- In MuJoCo the IMU quaternion is exact, so the sim does not show yaw drift. On the robot it will drift; correcting it needs the MID-360 (`slam_toolbox` or FAST-LIO) or a magnetometer.
+
+## Real-robot bridge: `g1_loco_bridge` (2026-11-07, untested on hardware)
+
+`cmd_vel -> g1::LocoClient::SetVelocity` at `command_rate` (10 Hz), with `command_duration` 0.3 s as the dead-man: if the process dies the robot stops on its own. Stale or missing `cmd_vel` sends zero once, then nothing, so the remote still works while Nav2 is idle. Conservative clamps (`max_vx` 0.3, `max_vy` 0.2, `max_wz` 0.3), `StopMove()` on shutdown, and the same leg odometry with `~/reset_odom`. It does not change the FSM unless `auto_start:=true`; put the robot in walking mode with the remote. It builds but has never run against a robot: first test on the gantry, with the remote's emergency stop in hand. The sim compensation tables are deliberately not used.
+

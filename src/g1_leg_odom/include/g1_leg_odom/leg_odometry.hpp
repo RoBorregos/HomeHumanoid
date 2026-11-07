@@ -64,6 +64,8 @@ public:
     double velocity_filter_tau = 0.1;  // s
   };
 
+  static constexpr int kLegJoints = 6;
+
   explicit LegOdometry(const Params & p) : p_(p) {}
 
   bool initialized() const { return init_; }
@@ -128,7 +130,7 @@ public:
   }
 
 private:
-  static constexpr int kLegJoints = 6, kPoints = 8;
+  static constexpr int kPoints = 8;
 
   struct Link {
     Eigen::Vector3d pos;
@@ -165,17 +167,22 @@ private:
   }
 
   static Eigen::Isometry3d foot_fk(bool left, const unitree_hg::msg::dds_::LowState_ & s) {
-    Eigen::Isometry3d t = Eigen::Isometry3d::Identity();
+    std::array<double, kLegJoints> q;
     const int base = left ? 0 : kLegJoints;
+    for (int i = 0; i < kLegJoints; ++i) q[i] = s.motor_state()[base + i].q();
+    return foot_fk(left, q);
+  }
+
+  // Pelvis -> ankle_roll_link for one leg's 6 joint angles, in LowState order.
+  static Eigen::Isometry3d foot_fk(bool left, const std::array<double, kLegJoints> & q) {
+    Eigen::Isometry3d t = Eigen::Isometry3d::Identity();
     const auto & chain = leg(left);
     for (int i = 0; i < kLegJoints; ++i) {
-      const double q = s.motor_state()[base + i].q();
       t = t * Eigen::Translation3d(chain[i].pos) * chain[i].quat.normalized() *
-          Eigen::AngleAxisd(q, chain[i].axis);
+          Eigen::AngleAxisd(q[i], chain[i].axis);
     }
     return t;
   }
-
   Params p_;
   bool init_ = false;
   int pivot_ = 0;

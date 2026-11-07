@@ -1,9 +1,10 @@
 <?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>g1_leg_odom</name>
   <version>0.1.0</version>
   <description>Leg-inertial odometry for the G1 from rt/lowstate (joint angles + IMU), for the sim and the real robot.</description>
-  <maintainer email="roborregos@todo.todo">RoBorregos</maintainer>
+  <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
   <license>MIT</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <build_depend>eigen</build_depend>
@@ -12,6 +13,9 @@
   <depend>nav_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>std_srvs</depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>

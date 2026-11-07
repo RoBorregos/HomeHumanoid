@@ -53,16 +53,13 @@ def launch_setup(context, *args, **kwargs):
     gz_cmd = ["gz", "sim", "-r", "-v", "3", world]
     if not gui:
         gz_cmd[2:2] = ["-s", "--headless-rendering"]
-    # DISPLAY unset + EGL_PLATFORM=surfaceless: this Orin's libEGL fails to
-    # get hardware acceleration through the X11 platform ("failed to create
-    # dri2 screen", reproduced under both --headless-rendering and a real
-    # Xvfb DISPLAY), so Ogre2 falls back to software rendering and
-    # real_time_factor collapses to ~0.003. `eglinfo -B` confirms the Tegra
-    # GPU works fine through GBM/surfaceless — forcing that platform and
-    # removing DISPLAY (so nothing tries X11 first) restores real_time_factor
-    # to ~1.0 with gpu_lidar still producing real data. Built as a full
-    # env replacement (not additional_env) so DISPLAY is actually absent,
-    # not just empty.
+    # DISPLAY unset + EGL_PLATFORM=surfaceless keeps Ogre2 off the X11 EGL
+    # platform, which fails on this Orin ("failed to create dri2 screen");
+    # `eglinfo -B` shows the GPU works through GBM/surfaceless. The ~0.003
+    # real_time_factor once blamed on EGL was the robot spawned at z=0 with
+    # its legs in the floor (docs/plan.md, "M2a continued — third Orin
+    # session"). Built as a full env replacement (not additional_env) so
+    # DISPLAY is actually absent, not just empty.
     gz_env = dict(os.environ)
     gz_env.pop("DISPLAY", None)
     gz_env["GZ_SIM_RESOURCE_PATH"] = _resource_path()
