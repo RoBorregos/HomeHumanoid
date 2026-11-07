@@ -8,6 +8,12 @@ The MuJoCo scene has no arena and no lidar, so the robot walks on an empty plane
 while Nav2 plans on the map: this validates cmd_vel -> walking -> odom, not
 obstacle avoidance or localization. See nav2_g1_mujoco_overlay.yaml.
 
+odom_source:=leg (default) takes /odom and odom -> pelvis from g1_leg_odom's
+estimator, from joint angles and the IMU as on the real robot, run inside
+g1_rl_bridge. MuJoCo's ground truth then goes to /odom_ground_truth, without TF,
+to measure the drift (scripts/odom_error.py). odom_source:=ground_truth is the
+original setup, with ground truth on /odom.
+
 Everything runs on wall time: nothing publishes /clock on this track.
 """
 
@@ -37,6 +43,10 @@ def launch_setup(context, *args, **kwargs):
     overlay_share = get_package_share_directory("g1_nav_overlay")
     map_name = LaunchConfiguration("map_name").perform(context)
     spawn = {k: float(LaunchConfiguration(k).perform(context)) for k in ("spawn_x", "spawn_y", "spawn_yaw")}
+    odom_source = LaunchConfiguration("odom_source").perform(context)
+    if odom_source not in ("leg", "ground_truth"):
+        raise RuntimeError(f"odom_source must be 'leg' or 'ground_truth', got {odom_source!r}")
+    dds = {"dds_network_interface": "lo", "dds_domain_id": 0}
 
     with open(os.path.join(overlay_share, "config", "nav2_g1.yaml")) as f:
         params = yaml.safe_load(f)
@@ -50,7 +60,7 @@ def launch_setup(context, *args, **kwargs):
         package="g1_rl_bridge",
         executable="g1_rl_bridge",
         output="screen",
-        parameters=[spawn, {"dds_network_interface": "lo", "dds_domain_id": 0}],
+        parameters=[spawn, dds, {"odom_source": odom_source}],
     )
     map_to_odom = Node(
         package="tf2_ros",
@@ -89,5 +99,6 @@ def generate_launch_description():
         DeclareLaunchArgument("spawn_x", default_value="4.17764"),
         DeclareLaunchArgument("spawn_y", default_value="-11.69743"),
         DeclareLaunchArgument("spawn_yaw", default_value="-1.989"),
+        DeclareLaunchArgument("odom_source", default_value="leg", description="leg | ground_truth"),
         OpaqueFunction(function=launch_setup),
     ])

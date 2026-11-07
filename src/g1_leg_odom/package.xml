@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_leg_odom</name>
+  <version>0.1.0</version>
+  <description>Leg-inertial odometry for the G1 from rt/lowstate (joint angles + IMU), for the sim and the real robot.</description>
+  <maintainer email="roborregos@todo.todo">RoBorregos</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>eigen</build_depend>
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>tf2_ros</depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

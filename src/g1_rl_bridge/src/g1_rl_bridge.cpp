@@ -22,7 +22,15 @@
 //
 // Odometry: unitree_mujoco publishes the IMU site's world position and velocity
 // on rt/sportmodestate using the go2 message type, even for the G1. Yaw comes
-// from the IMU in rt/lowstate.
+// from the IMU in rt/lowstate. That is ground truth the real robot doesn't have.
+// odom_source selects what drives /odom and odom -> pelvis:
+//   leg (default): g1_leg_odom's estimator, from joint angles and the IMU as on
+//     the robot, fed from this node's own rt/lowstate subscription. Ground truth
+//     goes to /odom_ground_truth, without TF, to measure the estimator's drift.
+//   ground_truth: MuJoCo's pose on /odom, the original Track B setup.
+// The estimator runs here rather than as the standalone g1_leg_odom node because
+// on loopback without multicast a second DDS participant can fail to get one of
+// the few auto participant indices that every DDS process on domain 0 shares.
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -30,6 +38,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -38,6 +47,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+
+#include "g1_leg_odom/leg_odometry.hpp"
 
 #include "unitree/idl/go2/SportModeState_.hpp"
 #include "unitree/idl/hg/LowState_.hpp"
@@ -94,6 +105,19 @@ public:
     spawn_yaw_ = declare_parameter("spawn_yaw", 0.0);
     odom_frame_ = declare_parameter("odom_frame", std::string("odom"));
     base_frame_ = declare_parameter("base_frame", std::string("pelvis"));
+    const auto odom_source = declare_parameter("odom_source", std::string("leg"));
+    if (odom_source != "leg" && odom_source != "ground_truth")
+      throw std::invalid_argument("odom_source must be 'leg' or 'ground_truth', got " + odom_source);
+    use_leg_ = odom_source == "leg";
+    if (use_leg_) {
+      g1_leg_odom::LegOdometry::Params lp;
+      lp.initial_x = spawn_x_;
+      lp.initial_y = spawn_y_;
+      lp.initial_yaw = spawn_yaw_;
+      lp.switch_margin = declare_parameter("switch_margin", lp.switch_margin);
+      lp.velocity_filter_tau = declare_parameter("velocity_filter_tau", lp.velocity_filter_tau);
+      leg_odom_ = std::make_unique<g1_leg_odom::LegOdometry>(lp);
+    }
     const auto iface = declare_parameter("dds_network_interface", std::string("lo"));
     const auto domain = declare_parameter("dds_domain_id", 0);
 
@@ -110,7 +134,8 @@ public:
         wz_ = m->twist.angular.z;
         last_cmd_ = std::chrono::steady_clock::now();
       });
-    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(use_leg_ ? "/odom_ground_truth" : "/odom", 10);
+    if (use_leg_) leg_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     tf_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     odom_timer_ = create_wall_timer(20ms, [this] { publish_odom(); });
 
@@ -141,6 +166,7 @@ private:
       yaw_ = rpy[2];
       wz_meas_ = in.imu_state().gyroscope()[2];
       have_yaw_ = true;
+      if (leg_odom_ && leg_odom_->update(in, std::chrono::steady_clock::now())) leg_fresh_ = true;
       const std::chrono::duration<double> age = std::chrono::steady_clock::now() - last_cmd_;
       if (ready_ && age.count() < cmd_timeout_) {
         vx = clampf(compensate(vx_, vx_want_, vx_cmd_), vx_min_, vx_max_);
@@ -170,6 +196,7 @@ private:
   }
 
   void publish_odom() {
+    if (use_leg_) publish_leg_odom();
     std::array<float, 2> p, v;
     double yaw, z, wz;
     {
@@ -208,6 +235,7 @@ private:
     o.twist.twist.linear.y = -std::sin(yaw) * v[0] + std::cos(yaw) * v[1];
     o.twist.twist.angular.z = wz;
     odom_pub_->publish(o);
+    if (use_leg_) return;  // Ground truth only for comparison: the TF is the estimate's.
 
     geometry_msgs::msg::TransformStamped t;
     t.header = o.header;
@@ -216,6 +244,21 @@ private:
     t.transform.translation.y = y;
     t.transform.rotation.z = o.pose.pose.orientation.z;
     t.transform.rotation.w = o.pose.pose.orientation.w;
+    tf_->sendTransform(t);
+  }
+
+  void publish_leg_odom() {
+    g1_leg_odom::Pose p;
+    {
+      std::lock_guard<std::mutex> l(mutex_);
+      if (!leg_odom_->initialized() || !leg_fresh_) return;
+      leg_fresh_ = false;
+      p = leg_odom_->pose();
+    }
+    nav_msgs::msg::Odometry o;
+    geometry_msgs::msg::TransformStamped t;
+    g1_leg_odom::to_msgs(p, get_clock()->now(), odom_frame_, base_frame_, o, t);
+    leg_pub_->publish(o);
     tf_->sendTransform(t);
   }
 
@@ -245,6 +288,8 @@ private:
   double cmd_timeout_, settle_s_, vx_min_, vx_max_, vy_max_, wz_max_, spawn_x_, spawn_y_, spawn_yaw_;
   std::vector<double> vx_want_, vx_cmd_, vy_want_, vy_cmd_, wz_want_, wz_cmd_;
   std::string odom_frame_, base_frame_;
+  bool use_leg_ = false, leg_fresh_ = false;
+  std::unique_ptr<g1_leg_odom::LegOdometry> leg_odom_;
 
   std::mutex mutex_;
   double vx_ = 0, vy_ = 0, wz_ = 0, yaw_ = 0, yaw0_ = 0, wz_meas_ = 0;
@@ -257,7 +302,7 @@ private:
   std::thread startup_;
 
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_sub_;
-  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_, leg_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_;
   rclcpp::TimerBase::SharedPtr odom_timer_;
   unitree::robot::ChannelPublisherPtr<LowState> pub_;

@@ -3,7 +3,8 @@
 
 Sim only. The band is driven by keystrokes to the MuJoCo window, so this needs xdotool
 and DISPLAY set. Run it once g1_rl_bridge reports it is accepting cmd_vel: releasing
-before the policy is walking drops the robot. Height comes from /odom's z.
+before the policy is walking drops the robot. Height comes from MuJoCo's ground truth,
+on /odom_ground_truth with odom_source:=leg (the default) or /odom otherwise.
 """
 import subprocess
 import time
@@ -20,26 +21,43 @@ def main():
     rclpy.init()
     node = Node("g1_release_band")
     state = {}
-    node.create_subscription(Odometry, "/odom", lambda m: state.update(z=m.pose.pose.position.z), 10)
+    heights = {}
+    # Ground truth wins when present: g1_leg_odom's /odom z is height over the foot,
+    # which doesn't drop when the band lowers the robot.
+    for topic in ("/odom_ground_truth", "/odom"):
+        node.create_subscription(
+            Odometry, topic, lambda m, t=topic: heights.__setitem__(t, m.pose.pose.position.z), 10)
+
+    def update_z():
+        for topic in ("/odom_ground_truth", "/odom"):
+            if topic in heights:
+                state["z"] = heights[topic]
+                return
 
     def spin(seconds):
         end = time.time() + seconds
         while time.time() < end:
             rclpy.spin_once(node, timeout_sec=0.02)
+            update_z()
 
     window = subprocess.run(
         ["xdotool", "search", "--name", "MuJoCo"], capture_output=True, text=True, check=True
     ).stdout.split()[-1]
 
     def press(key):
-        subprocess.run(["xdotool", "windowactivate", "--sync", window, "key", key], check=True)
+        # windowactivate needs a window manager; a bare Xvfb has none, so fall
+        # back to setting the input focus directly.
+        if subprocess.run(["xdotool", "windowactivate", "--sync", window], capture_output=True).returncode:
+            subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True)
+        subprocess.run(["xdotool", "key", key], check=True)
 
     deadline = time.time() + 20.0
     while "z" not in state:
         if time.time() > deadline:
-            raise SystemExit("no /odom received, is g1_rl_bridge running?")
+            raise SystemExit("no /odom_ground_truth or /odom received, is g1_rl_bridge running?")
         spin(0.1)
     spin(2.0)
+    print(f"height from {next(t for t in ('/odom_ground_truth', '/odom') if t in heights)}")
     last, flat = state["z"], 0
     for _ in range(30):
         press("8")
