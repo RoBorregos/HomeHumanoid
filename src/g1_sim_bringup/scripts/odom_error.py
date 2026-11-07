@@ -8,6 +8,7 @@ sample pair to a CSV.
 
     python3 odom_error.py --period 5 --csv /tmp/g1nav/odom_error.csv
 """
+
 import argparse
 import csv
 import math
@@ -38,7 +39,19 @@ class OdomError(Node):
         if csv_path:
             self.csv_file = open(csv_path, "w", newline="")
             self.writer = csv.writer(self.csv_file)
-            self.writer.writerow(["t", "gt_x", "gt_y", "gt_yaw", "est_x", "est_y", "est_yaw", "err_xy", "err_yaw"])
+            self.writer.writerow(
+                [
+                    "t",
+                    "gt_x",
+                    "gt_y",
+                    "gt_yaw",
+                    "est_x",
+                    "est_y",
+                    "est_yaw",
+                    "err_xy",
+                    "err_yaw",
+                ]
+            )
         self.create_subscription(Odometry, "/odom", self.on_est, 10)
         self.create_subscription(Odometry, "/odom_ground_truth", self.on_gt, 10)
         self.create_timer(period, self.report)
@@ -59,7 +72,19 @@ class OdomError(Node):
         self.last = (err, err_yaw, g, e)
         if self.writer:
             t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
-            self.writer.writerow([f"{t:.3f}", g.x, g.y, yaw_of(m), e.x, e.y, yaw_of(self.est), err, err_yaw])
+            self.writer.writerow(
+                [
+                    f"{t:.3f}",
+                    g.x,
+                    g.y,
+                    yaw_of(m),
+                    e.x,
+                    e.y,
+                    yaw_of(self.est),
+                    err,
+                    err_yaw,
+                ]
+            )
 
     def report(self):
         if self.last is None:
