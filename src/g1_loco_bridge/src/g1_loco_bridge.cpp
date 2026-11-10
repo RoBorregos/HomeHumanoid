@@ -65,6 +65,9 @@ public:
     lp.initial_y = declare_parameter("initial_y", 0.0);
     lp.initial_yaw = declare_parameter("initial_yaw", 0.0);
     lp.switch_margin = declare_parameter("switch_margin", lp.switch_margin);
+    lp.use_load = declare_parameter("use_load", lp.use_load);
+    lp.load_filter_tau = declare_parameter("load_filter_tau", lp.load_filter_tau);
+    lp.load_hysteresis = declare_parameter("load_hysteresis", lp.load_hysteresis);
     lp.velocity_filter_tau = declare_parameter("velocity_filter_tau", lp.velocity_filter_tau);
     odom_ = std::make_unique<g1_leg_odom::LegOdometry>(lp);
 

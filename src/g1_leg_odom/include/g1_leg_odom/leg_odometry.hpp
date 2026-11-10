@@ -3,7 +3,7 @@
 // MuJoCo's ground-truth pose (rt/sportmodestate) does not exist on the real G1:
 // unitree_hg's SportModeState_ has no pose (docs/plan.md, open question 5). This
 // estimates the pelvis pose from what both the sim and the robot publish on
-// rt/lowstate: the 12 leg joint angles and the pelvis IMU orientation.
+// rt/lowstate: the 12 leg joint angles and torques and the pelvis IMU orientation.
 //
 // Method (stance-pivot anchoring):
 //   - Orientation comes from the IMU quaternion, re-based so the first sample
@@ -11,11 +11,19 @@
 //     its yaw is gyro-integrated and drifts, which this does not correct.
 //   - Forward kinematics gives 4 sole contact points per foot (the 8 spheres of
 //     the MuJoCo model) relative to the pelvis, rotated into the odom frame.
-//   - The lowest point is taken as the pivot touching the ground, and is assumed
-//     not to move: pelvis = anchor - R * p_pivot. When another point becomes
-//     lower by more than switch_margin, the anchor moves to it, keeping the
-//     pelvis position continuous. Using the lowest corner rather than the sole's
-//     center follows the heel-to-toe roll instead of counting it as motion.
+//   - The stance foot is the one carrying more of the weight. Each foot's
+//     vertical ground force comes from its leg's joint torques (tau = J^T F),
+//     low-passed. Height alone picks badly: on flat ground the landing foot is
+//     as low as the planted one while it still moves, and waiting for a height
+//     margin keeps the old foot as the pivot after it has lifted. In MuJoCo that
+//     cost 3.5% of the distance walked, against 0.3% by load (docs/plan.md).
+//     Without load (lifted, or use_load off) the stance foot is the lower one,
+//     by switch_margin.
+//   - The lowest corner of the stance foot is the pivot touching the ground,
+//     assumed not to move: pelvis = anchor - R * p_pivot. When the pivot
+//     changes, the anchor moves to the new point, keeping the pelvis position
+//     continuous. Using the lowest corner rather than the sole's center follows
+//     the heel-to-toe roll instead of counting it as motion.
 //   - Velocity is a low-passed finite difference of that position.
 // Errors come from foot slip and yaw drift; there is no loop closure, so on the
 // real robot this is meant to be corrected by a localizer.
@@ -34,6 +42,7 @@
 // process on domain 0.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -60,7 +69,11 @@ class LegOdometry {
 public:
   struct Params {
     double initial_x = 0, initial_y = 0, initial_yaw = 0;
-    double switch_margin = 0.005;      // m
+    double switch_margin = 0.005;      // m, between feet when there is no load to go by.
+    bool use_load = true;              // Stance foot from the joint torques.
+    double load_filter_tau = 0.03;     // s
+    double load_hysteresis = 0.1;      // Share of the load over 0.5 that moves the stance.
+    double min_load = 50.0;            // N on both feet; under it the robot is not standing.
     double velocity_filter_tau = 0.1;  // s
   };
 
@@ -72,6 +85,7 @@ public:
   // Starts over at the initial pose on the next sample.
   void reset() {
     init_ = false;
+    load_[0] = load_[1] = 0;
     pose_ = Pose();
   }
   const Pose & pose() const { return pose_; }
@@ -99,26 +113,49 @@ public:
       const Eigen::Isometry3d t = foot_fk(f == 0, s);
       for (int c = 0; c < 4; ++c) pts[f * 4 + c] = rot * (t * sole()[c]);
     }
-    int lowest = 0;
-    for (int i = 1; i < kPoints; ++i)
-      if (pts[i].z() < pts[lowest].z()) lowest = i;
+    const auto lowest_of = [&pts](int foot) {
+      int low = foot * 4;
+      for (int i = low + 1; i < foot * 4 + 4; ++i)
+        if (pts[i].z() < pts[low].z()) low = i;
+      return low;
+    };
+    const int low[2] = {lowest_of(0), lowest_of(1)};
+
+    const double dt = init_ ? std::chrono::duration<double>(now - last_t_).count() : 0.0;
+    last_t_ = now;
+    double load[2] = {0, 0};
+    if (p_.use_load) {
+      for (int f = 0; f < 2; ++f) {
+        const double fz = std::max(0.0, -(rot * foot_force(f == 0, s)).z());
+        const double a = init_ ? dt / (p_.load_filter_tau + dt) : 1.0;
+        load_[f] += a * (fz - load_[f]);
+        load[f] = load_[f];
+      }
+    }
+    const double total = load[0] + load[1];
+    const bool loaded = p_.use_load && total > p_.min_load;
 
     Vector3d & pos = pose_.pos;
     if (!init_) {
-      pivot_ = lowest;
+      stance_ = loaded ? (load[1] > load[0]) : (pts[low[1]].z() < pts[low[0]].z());
+      pivot_ = low[stance_];
       pos = Vector3d(p_.initial_x, p_.initial_y, -pts[pivot_].z());  // Pivot on z=0.
       anchor_ = pos + pts[pivot_];
-      last_t_ = now;
       init_ = true;
-    } else if (lowest != pivot_ && pts[lowest].z() < pts[pivot_].z() - p_.switch_margin) {
-      anchor_ = (anchor_ - pts[pivot_]) + pts[lowest];  // Current estimate, no jump.
-      pivot_ = lowest;
-      ++pose_.pivot_switches;
+    } else {
+      const int other = 1 - stance_;
+      if (loaded ? load[other] > (0.5 + p_.load_hysteresis) * total
+                 : pts[low[other]].z() < pts[low[stance_]].z() - p_.switch_margin) {
+        stance_ = other;
+      }
+      if (low[stance_] != pivot_) {
+        anchor_ = (anchor_ - pts[pivot_]) + pts[low[stance_]];  // Current estimate, no jump.
+        pivot_ = low[stance_];
+        ++pose_.pivot_switches;
+      }
     }
     const Vector3d prev = pos;
     pos = anchor_ - pts[pivot_];
-    const double dt = std::chrono::duration<double>(now - last_t_).count();
-    last_t_ = now;
     if (dt > 1e-4 && dt < 0.1) {
       const double a = dt / (p_.velocity_filter_tau + dt);
       pose_.vel = (1 - a) * pose_.vel + a * (pos - prev) / dt;
@@ -167,25 +204,52 @@ private:
   }
 
   static Eigen::Isometry3d foot_fk(bool left, const unitree_hg::msg::dds_::LowState_ & s) {
-    std::array<double, kLegJoints> q;
-    const int base = left ? 0 : kLegJoints;
-    for (int i = 0; i < kLegJoints; ++i) q[i] = s.motor_state()[base + i].q();
-    return foot_fk(left, q);
+    return foot_fk(left, s, nullptr);
   }
 
-  // Pelvis -> ankle_roll_link for one leg's 6 joint angles, in LowState order.
-  static Eigen::Isometry3d foot_fk(bool left, const std::array<double, kLegJoints> & q) {
+  // Pelvis -> ankle_roll_link for one leg, from LowState's joint angles. With
+  // jac, also the 6x6 Jacobian (linear over angular) of a point in the middle of
+  // the sole, in the pelvis frame.
+  static Eigen::Isometry3d foot_fk(bool left, const unitree_hg::msg::dds_::LowState_ & s,
+                                   Eigen::Matrix<double, 6, kLegJoints> * jac) {
     Eigen::Isometry3d t = Eigen::Isometry3d::Identity();
     const auto & chain = leg(left);
+    const int base = left ? 0 : kLegJoints;
+    std::array<Eigen::Vector3d, kLegJoints> origin, axis;
     for (int i = 0; i < kLegJoints; ++i) {
-      t = t * Eigen::Translation3d(chain[i].pos) * chain[i].quat.normalized() *
-          Eigen::AngleAxisd(q[i], chain[i].axis);
+      t = t * Eigen::Translation3d(chain[i].pos) * chain[i].quat.normalized();
+      origin[i] = t.translation();
+      axis[i] = t.linear() * chain[i].axis;
+      t = t * Eigen::AngleAxisd(s.motor_state()[base + i].q(), chain[i].axis);
+    }
+    if (jac) {
+      const Eigen::Vector3d c = t * Eigen::Vector3d(0.035, 0, -0.035);
+      for (int i = 0; i < kLegJoints; ++i) {
+        jac->block<3, 1>(0, i) = axis[i].cross(c - origin[i]);
+        jac->block<3, 1>(3, i) = axis[i];
+      }
     }
     return t;
   }
+
+  // Force the leg's motors put on the ground through the sole, in the pelvis
+  // frame, from tau = J^T F. Ignores the leg's own weight and inertia, which is
+  // enough to tell which foot carries the robot.
+  static Eigen::Vector3d foot_force(bool left, const unitree_hg::msg::dds_::LowState_ & s) {
+    Eigen::Matrix<double, 6, kLegJoints> jac;
+    foot_fk(left, s, &jac);
+    Eigen::Matrix<double, kLegJoints, 1> tau;
+    const int base = left ? 0 : kLegJoints;
+    for (int i = 0; i < kLegJoints; ++i) tau[i] = s.motor_state()[base + i].tau_est();
+    const Eigen::Matrix<double, 6, 1> f = jac.transpose().colPivHouseholderQr().solve(tau);
+    return f.head<3>();
+  }
+
   Params p_;
   bool init_ = false;
   int pivot_ = 0;
+  int stance_ = 0;  // 0 left, 1 right.
+  double load_[2] = {0, 0};
   Eigen::Vector3d anchor_ = Eigen::Vector3d::Zero();
   Eigen::Quaterniond yaw_offset_ = Eigen::Quaterniond::Identity();
   std::chrono::steady_clock::time_point last_t_;

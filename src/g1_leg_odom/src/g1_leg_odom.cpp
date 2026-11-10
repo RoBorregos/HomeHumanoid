@@ -59,6 +59,9 @@ private:
     p.initial_y = declare_parameter("initial_y", 0.0);
     p.initial_yaw = declare_parameter("initial_yaw", 0.0);
     p.switch_margin = declare_parameter("switch_margin", p.switch_margin);
+    p.use_load = declare_parameter("use_load", p.use_load);
+    p.load_filter_tau = declare_parameter("load_filter_tau", p.load_filter_tau);
+    p.load_hysteresis = declare_parameter("load_hysteresis", p.load_hysteresis);
     p.velocity_filter_tau = declare_parameter("velocity_filter_tau", p.velocity_filter_tau);
     return p;
   }

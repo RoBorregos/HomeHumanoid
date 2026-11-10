@@ -116,6 +116,9 @@ public:
       lp.initial_y = spawn_y_;
       lp.initial_yaw = spawn_yaw_;
       lp.switch_margin = declare_parameter("switch_margin", lp.switch_margin);
+      lp.use_load = declare_parameter("use_load", lp.use_load);
+      lp.load_filter_tau = declare_parameter("load_filter_tau", lp.load_filter_tau);
+      lp.load_hysteresis = declare_parameter("load_hysteresis", lp.load_hysteresis);
       lp.velocity_filter_tau = declare_parameter("velocity_filter_tau", lp.velocity_filter_tau);
       leg_odom_ = std::make_unique<g1_leg_odom::LegOdometry>(lp);
     }
@@ -180,7 +183,6 @@ private:
       yaw_ = rpy[2];
       wz_meas_ = in.imu_state().gyroscope()[2];
       have_yaw_ = true;
-      if (leg_odom_ && leg_odom_->update(in, std::chrono::steady_clock::now())) leg_fresh_ = true;
       const std::chrono::duration<double> age = std::chrono::steady_clock::now() - last_cmd_;
       if (ready_ && age.count() < cmd_timeout_) {
         vx = clampf(compensate(vx_, vx_want_, vx_cmd_), vx_min_, vx_max_);
@@ -199,6 +201,14 @@ private:
     std::memcpy(remote.data() + kOffsetLy, &ly, sizeof(ly));
     out.wireless_remote(remote);
     pub_->Write(out);
+    // After the relay, not before: g1_ctrl takes the newest sample on the topic,
+    // and until this copy lands that is MuJoCo's own, with no joystick. Running
+    // the estimator first widened that gap enough that the FSM missed the
+    // button presses and the policy read zero velocity most of the time.
+    if (leg_odom_) {
+      std::lock_guard<std::mutex> l(mutex_);
+      if (leg_odom_->update(in, std::chrono::steady_clock::now())) leg_fresh_ = true;
+    }
   }
 
   void on_sport(const SportState & s) {
