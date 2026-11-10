@@ -77,7 +77,8 @@ One entry point, like home2's `./run.sh`: a target (where the G1 runs), a task, 
 **Map → tag → navigate** (same workflow as home2):
 
 ```bash
-./run.sh sim --mapping --headless   # SLAM + Nav2 on the growing map; drive it with goals (--nav-ui)
+./run.sh sim --mapping --headless   # SLAM + Nav2 on the growing map; drive it with goals (--nav-ui),
+                                    #   each inside the map built so far
 ./run.sh --save-map my_map          # -> src/g1_navigation/maps/my_map.{pgm,yaml,posegraph,data}
 ./run.sh --stop
 ./run.sh --tagger                   # -> maps/areas/areas_my_map.json

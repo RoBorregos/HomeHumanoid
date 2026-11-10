@@ -2,6 +2,15 @@
 # the robot. Frames: base_link is the planar footprint on the floor (see
 # g1_description/launch/description.launch.py), so z here is height over the floor.
 
+drop_no_return:
+  ros__parameters:
+    # Only there to drop non-finite points: a PassThrough discards any point
+    # whose filter field is not finite. The limits are wider than any return.
+    filter_field_name: x
+    filter_limit_min: -1000.0
+    filter_limit_max: 1000.0
+    keep_organized: false
+
 body_crop:
   ros__parameters:
     # Box around the G1's own body and arms, removed (negative: true). The

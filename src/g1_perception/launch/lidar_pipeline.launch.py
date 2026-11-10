@@ -1,7 +1,7 @@
-"""MID-360 cloud -> body crop -> /livox/points_filtered -> /scan.
+"""MID-360 cloud -> drop no-return points -> body crop -> /livox/points_filtered -> /scan.
 
 One container with intra-process comms, so the ~23k-point cloud is not
-serialized between the two filters. Inputs/outputs:
+serialized between the filters. Inputs/outputs:
   cloud_in (default /livox/lidar, PointCloud2 in mid360_link)
   /livox/points_filtered  PointCloud2 in mid360_link, robot body removed
                           (VoxelLayer in the local costmap, FAST-LIO in sim)
@@ -33,12 +33,25 @@ def generate_launch_description():
         output="screen",
         parameters=[{"use_sim_time": use_sim_time}],
         composable_node_descriptions=[
+            # Gazebo's gpu_lidar fills rays with no return with inf and still marks
+            # the cloud dense, so CropBox keeps them. FAST-LIO's voxel filter then
+            # collapsed to ~140 points a scan and the odometry diverged within
+            # metres. The real driver sends no such points; there this is a no-op.
+            ComposableNode(
+                package="pcl_ros",
+                plugin="pcl_ros::PassThrough",
+                name="drop_no_return",
+                parameters=common,
+                remappings=[("input", LaunchConfiguration("cloud_in")),
+                            ("output", "/livox/points_finite")],
+                extra_arguments=[{"use_intra_process_comms": True}],
+            ),
             ComposableNode(
                 package="pcl_ros",
                 plugin="pcl_ros::CropBox",
                 name="body_crop",
                 parameters=common,
-                remappings=[("input", LaunchConfiguration("cloud_in")),
+                remappings=[("input", "/livox/points_finite"),
                             ("output", "/livox/points_filtered")],
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),

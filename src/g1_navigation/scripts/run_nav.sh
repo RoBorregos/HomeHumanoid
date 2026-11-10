@@ -47,7 +47,13 @@ case "${1:-}" in
     echo "Serializing pose graph -> $base.posegraph/.data"
     ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$base'}"
     echo "Saving occupancy grid -> $base.yaml/.pgm"
-    ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap "{name: {data: '$base'}}"
+    # map_saver_cli directly, not /slam_toolbox/save_map: that service runs the
+    # same tool with a 2 s wait for /map and returned 255 ("Failed to spin map
+    # subscription") in Gazebo, leaving a pose graph with no .pgm/.yaml.
+    sim_time="$(ros2 param get /slam_toolbox use_sim_time 2>/dev/null | grep -o 'True\|False' || echo False)"
+    ros2 run nav2_map_server map_saver_cli -f "$base" --ros-args \
+      -p save_map_timeout:=10.0 -p map_subscribe_transient_local:=true -p use_sim_time:="$sim_time"
+    [ -f "$base.yaml" ] && [ -f "$base.pgm" ] || { echo "Map not saved: no $base.yaml/.pgm" >&2; exit 1; }
     ls -la "$base".*
     echo "Next: run_nav.sh --tagger (save areas as $G1_MAPS_DIR/areas/areas_$name.json), then MAP_NAME=$name run_nav.sh --nav" ;;
   --tagger)

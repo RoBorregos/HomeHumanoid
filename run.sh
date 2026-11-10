@@ -69,7 +69,12 @@ setup_env() {
 # Everything started here goes in its own session, recorded so --stop can find it.
 track() { echo "$2" >> "$LOG/run.pids"; echo "$1 (pid $2)"; }
 
-ours() { pgrep -u "$(id -u)" -af 'ros2 launch g1_|unitree_mujoco|g1_ctrl|gz sim|g1_rl_bridge|g1_loco_bridge' | grep -v pgrep || true; }
+# Anchored on the start of the command line, so a shell or ssh command that only
+# mentions one of these names is not taken for the process itself.
+ours() {
+  pgrep -u "$(id -u)" -af 'ros2 launch g1_|unitree_mujoco|g1_ctrl|gz sim|g1_rl_bridge|g1_loco_bridge' \
+    | grep -E '^[0-9]+ ([^ ]*python3 [^ ]*ros2 launch g1_|[^ ]*unitree_mujoco|[^ ]*g1_ctrl|gz sim|ruby [^ ]*gz sim|[^ ]*/g1_(rl|loco)_bridge)' || true
+}
 
 stop_all() {
   local pids=""

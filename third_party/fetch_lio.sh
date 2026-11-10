@@ -49,6 +49,9 @@ for f in $(grep -rl "uint8_t\|uint32_t" "${WS}/deps/Livox-SDK2/sdk_core" --inclu
   grep -q "<cstdint>" "$f" || sed -i '0,/#include/s//#include <cstdint>\n#include/' "$f"
 done
 
+# FAST_LIO pins C++14 in several places; rclcpp on Jazzy needs C++17.
+sed -i -E 's/-std=c\+\+(14|0x)/-std=c++17/g; s/(CMAKE_CXX_STANDARD) 14/\1 17/' "${WS}/src/FAST_LIO/CMakeLists.txt"
+
 [ "${1:-}" = "--no-build" ] && exit 0
 
 cmake -S "${WS}/deps/Livox-SDK2" -B "${WS}/deps/Livox-SDK2/build" \
@@ -61,10 +64,12 @@ set +u  # ROS setup scripts read unset variables
 source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 set -u
 cd "${WS}"
+# DISTRO_ROS selects the driver's rosidl typesupport path (it is its build.sh that
+# normally sets it); without it CMake stops on LIVOX_INTERFACES_INCLUDE_DIRECTORIES.
 CMAKE_PREFIX_PATH="${SDK_PREFIX}:${CMAKE_PREFIX_PATH:-}" \
 LIBRARY_PATH="${SDK_PREFIX}/lib:${LIBRARY_PATH:-}" \
 CPATH="${SDK_PREFIX}/include:${CPATH:-}" \
-colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release -DROS_EDITION=ROS2 \
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release -DROS_EDITION=ROS2 -DDISTRO_ROS=${ROS_DISTRO:-jazzy} \
   -DLIVOX_LIDAR_SDK_LIBRARY="${SDK_PREFIX}/lib/liblivox_lidar_sdk_shared.so" \
   -DLIVOX_LIDAR_SDK_INCLUDE_DIR="${SDK_PREFIX}/include" \
   -DCMAKE_INSTALL_RPATH="${SDK_PREFIX}/lib" -DCMAKE_BUILD_RPATH="${SDK_PREFIX}/lib" \

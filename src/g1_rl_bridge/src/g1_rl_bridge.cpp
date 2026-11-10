@@ -95,12 +95,25 @@ public:
     vy_max_ = declare_parameter("vy_max", 0.5);
     wz_max_ = declare_parameter("wz_max", 1.0);
     // Measured steady tracking; the 0.01 entry jumps straight to the dead zone's edge.
-    vx_want_ = declare_parameter("vx_want", std::vector<double>{0.0, 0.01, 0.109, 0.161, 0.305, 0.397});
-    vx_cmd_ = declare_parameter("vx_cmd", std::vector<double>{0.0, 0.2, 0.25, 0.3, 0.4, 0.5});
+    // Re-measured 2026-11-10, after the relay fix: the policy does not step
+    // under a command of about 0.25 m/s.
+    vx_want_ = declare_parameter("vx_want", std::vector<double>{0.0, 0.003, 0.159, 0.313, 0.396});
+    vx_cmd_ = declare_parameter("vx_cmd", std::vector<double>{0.0, 0.25, 0.3, 0.4, 0.5});
     vy_want_ = declare_parameter("vy_want", std::vector<double>{0.0, 0.01, 0.197, 0.345});
     vy_cmd_ = declare_parameter("vy_cmd", std::vector<double>{0.0, 0.2, 0.3, 0.5});
     wz_want_ = declare_parameter("wz_want", std::vector<double>{0.0, 0.01, 0.048, 0.156, 0.414});
     wz_cmd_ = declare_parameter("wz_cmd", std::vector<double>{0.0, 0.2, 0.3, 0.6, 1.0});
+    // Turning in place, measured per side (2026-11-10). The policy is not
+    // symmetric: to the right it turns about half as fast, up to 0.22 rad/s. To
+    // the left it also walks backwards, 0.2 m/s at full command, an orbit of
+    // 0.5 m radius that put the robot inside the map's walls; a forward command
+    // (turn_left_vx) cancels it, leaving under 0.03 m/s.
+    turn_below_ = declare_parameter("turn_in_place_below", 0.05);
+    left_want_ = declare_parameter("turn_left_want", std::vector<double>{0.0, 0.026, 0.029, 0.075, 0.09, 0.264, 0.40});
+    left_cmd_ = declare_parameter("turn_left_cmd", std::vector<double>{0.0, 0.2, 0.3, 0.6, 0.7, 0.8, 1.0});
+    left_vx_ = declare_parameter("turn_left_vx", std::vector<double>{0.0, 0.0, 0.0, 0.1, 0.15, 0.22, 0.29});
+    right_want_ = declare_parameter("turn_right_want", std::vector<double>{0.0, 0.011, 0.069, 0.112, 0.181, 0.22});
+    right_cmd_ = declare_parameter("turn_right_cmd", std::vector<double>{0.0, 0.3, 0.6, 0.8, 0.9, 1.0});
     spawn_x_ = declare_parameter("spawn_x", 0.0);
     spawn_y_ = declare_parameter("spawn_y", 0.0);
     spawn_yaw_ = declare_parameter("spawn_yaw", 0.0);
@@ -194,6 +207,16 @@ private:
         vx = clampf(compensate(vx_, vx_want_, vx_cmd_), vx_min_, vx_max_);
         vy = clampf(compensate(vy_, vy_want_, vy_cmd_), -vy_max_, vy_max_);
         wz = clampf(compensate(wz_, wz_want_, wz_cmd_), -wz_max_, wz_max_);
+        if (std::fabs(vx_) < turn_below_ && std::fabs(vy_) < turn_below_ && wz_ != 0.0) {
+          vy = 0;
+          if (wz_ > 0) {
+            wz = clampf(compensate(wz_, left_want_, left_cmd_), -wz_max_, wz_max_);
+            vx = compensate(wz_, left_want_, left_vx_);
+          } else {
+            wz = clampf(compensate(wz_, right_want_, right_cmd_), -wz_max_, wz_max_);
+            vx = 0;
+          }
+        }
       }
     }
     const uint16_t keys = keys_.load();
@@ -317,6 +340,8 @@ private:
 
   double cmd_timeout_, settle_s_, vx_min_, vx_max_, vy_max_, wz_max_, spawn_x_, spawn_y_, spawn_yaw_;
   std::vector<double> vx_want_, vx_cmd_, vy_want_, vy_cmd_, wz_want_, wz_cmd_;
+  std::vector<double> left_want_, left_cmd_, left_vx_, right_want_, right_cmd_;
+  double turn_below_;
   std::string odom_frame_, base_frame_;
   bool use_leg_ = false, leg_fresh_ = false;
   std::unique_ptr<g1_leg_odom::LegOdometry> leg_odom_;
