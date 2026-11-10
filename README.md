@@ -15,7 +15,9 @@ The G1 exposes the **same `/navigation/*` interface as FRIDA** (`nav_central`, `
 ```
 HomeHumanoid/
   vendor/home2/            # git submodule of RoBorregos/home2 (pinned to a commit)
-  docker/                  # Dockerfile + compose (cpu/cuda/l4t) + run.sh
+  lib.sh                   # helpers shared by run.sh and docker/<area>/run.sh (as in home2)
+  docker/navigation/       # navigation container: Dockerfile, compose, run.sh
+  docker/simulation/       # simulation container (Gazebo + MuJoCo)
   src/
     g1_description/        # G1 URDF/xacro, 3D MID-360 + IMU sim sensors, base_link -> pelvis
     g1_perception/         # MID-360: body crop, /scan projection, FAST-LIO odometry adapter
@@ -56,7 +58,7 @@ source third_party/lio_ws/install/setup.bash     # if built
 colcon build
 ```
 
-Or `./docker/run.sh cpu|cuda|l4t` and build inside the container (the repo is mounted at `/ws`) (`./run.sh --build` does the `colcon build`). The Orin runs it natively.
+Or run everything in containers, one per area, see [Containers](#containers-one-per-area-like-home2) below. The team Orin runs it natively too.
 
 ## Step-by-step guide: using the G1
 
@@ -153,15 +155,14 @@ On the robot everything runs on the **Orin inside the G1** (Unitree's developmen
   ./third_party/fetch_lio.sh        # Livox driver + FAST-LIO (~15 min)
   ./run.sh --build
   ```
-- **Older Ubuntu (the G1 ships with 20.04 / JetPack 5):** Jazzy needs 24.04, so use the container. The image already has `unitree_sdk2`; the repo is mounted at `/ws`.
+- **Any other OS (the G1 may ship with 20.04 / JetPack 5): containers.** Jazzy needs 24.04, which the images bring. Only Docker is needed on the robot.
   ```bash
-  git clone -b Nav2_implementation https://github.com/RoBorregos/HomeHumanoid.git ~/HomeHumanoid
+  git clone https://github.com/RoBorregos/HomeHumanoid.git ~/HomeHumanoid
   cd ~/HomeHumanoid && git submodule update --init --recursive
   ./src/g1_description/scripts/vendor_g1.sh
-  ./docker/run.sh l4t                 # builds the image the first time, then opens a shell in /ws
-  # inside the container:
-  ./third_party/fetch_lio.sh && ./run.sh --build
+  ./run.sh navigation --build --build-image --mode robot --nav    # first time: image + colcon build
   ```
+  Then use `./run.sh navigation ... --mode robot` instead of `./run.sh robot` below (see [Containers](#containers-one-per-area-like-home2)). The navigation image does not use CUDA, so an older JetPack driver is not a problem for it.
 
 `ROS_DOMAIN_ID` doesn't need changing there (home2 doesn't run on the robot), unless the robot's Orin also runs other ROS nodes.
 
@@ -195,6 +196,48 @@ With any target running (`sim`, `mujoco` or `robot`) on the same `ROS_DOMAIN_ID`
 | Goals fail right at the start | Wait for `nav_central` to finish, or the robot is lost: set the initial pose in `--ui` |
 | `livox_ros_driver2 not found` | Real robot only: build `./third_party/fetch_lio.sh`, then `./run.sh --build` |
 | Gazebo very slow | Another simulation is running on the Orin: `./run.sh --status`, `nvidia-smi`/`top` |
+
+## Containers: one per area, like home2
+
+`./run.sh <area>` runs each area in its own container, with home2's layout: `docker/<area>/{Dockerfile, docker-compose.yaml, run.sh}`, the repo mounted at `/workspace/src`, and `build/ install/ log/` per area under `docker/<area>/`. The idea is the same as in home2: every area is a self-contained unit that can move to the robot's Orin as it is.
+
+| Area | Image | What runs inside | Where |
+|---|---|---|---|
+| `navigation` | on `roborregos/home2:<env>_base` | lidar pipeline, FAST-LIO, slam_toolbox, Nav2, `nav_central`, `semantic_nav`; with `--mode robot` also the MID-360 driver and `g1_loco_bridge` (what FRIDA's `omnidriver` is in home2's navigation container) | dev machines and the G1 |
+| `simulation` | on `ros:jazzy` | Gazebo (world, G1, ros_gz bridge, odometry) and MuJoCo (`unitree_mujoco`, `g1_ctrl`, `g1_rl_bridge`) | dev machines only |
+| `vision`, `hri`, `manipulation`, ... | home2's | forwarded to `vendor/home2/run.sh` | as in home2 |
+
+The navigation image is built on home2's base image on purpose: on the G1's Orin it shares its layers (ROS, CycloneDDS, and on l4t CUDA/OpenCV/torch) with home2's vision and hri images, which are to move there too. All containers use the host network and the same `ROS_DOMAIN_ID` (taken from your shell), so they talk to each other and to home2's.
+
+```bash
+# first time (image + colcon build; images take a while)
+./run.sh simulation --build --build-image
+./run.sh navigation --build --build-image
+
+# Gazebo + navigation, then the same checks as natively
+./run.sh simulation --gz -d                       # Gazebo, the G1, its sensors and odometry
+./run.sh navigation --nav -d                      # lidar pipeline, localization, Nav2, nav_central
+./run.sh navigation --check --tour kitchen exit   # tools run in the running container
+./run.sh navigation --stop && ./run.sh simulation --stop
+
+# mapping in Gazebo
+./run.sh simulation --gz -d
+./run.sh navigation --mapping --nav-ui -d
+./run.sh navigation --save-map my_map
+./run.sh navigation --tagger
+
+# MuJoCo
+./run.sh simulation --mujoco -d
+./run.sh navigation --nav --mode mujoco
+
+# real G1, on its Orin
+./run.sh navigation --mapping --mode robot
+./run.sh navigation --nav --mode robot --map lab
+```
+
+`./run.sh navigation` or `./run.sh simulation` with no task opens a shell in the container. `--stop`, `--down`, `--recreate`, `--clean` and `-d` work as in home2. `G1_MODE=robot` in the robot's shell makes `--mode robot` the default there.
+
+The native targets below (`./run.sh sim|mujoco|robot`) still work and run the same launch files; the containers only split them: `sim_gz.launch.py nav:=false perception:=false` in `simulation`, `g1_bringup/nav_area.launch.py` in `navigation`.
 
 ## Running it: `./run.sh`
 
