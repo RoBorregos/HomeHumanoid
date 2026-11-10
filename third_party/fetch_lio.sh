@@ -15,7 +15,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WS="${HERE}/lio_ws"
+WS="${LIO_WS:-${HERE}/lio_ws}"   # LIO_WS: the navigation image builds into /home/ros/lio_ws
 SDK_PREFIX="${WS}/sdk"
 JOBS="${JOBS:-6}"
 

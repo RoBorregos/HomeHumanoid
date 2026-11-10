@@ -122,10 +122,14 @@ def launch_setup(context, *args, **kwargs):
             "odom_out_topic": "/odom_bridge" if use_lio else "/odom",
         }],
     )
-    perception = _include("g1_perception", "lidar_pipeline.launch.py",
-                          {"use_sim_time": "true", "cloud_in": "/livox/lidar"})
-    robot = [bridge, clock_throttle, base_bridge, perception]
-    if use_lio:
+    robot = [bridge, clock_throttle, base_bridge]
+    # perception:=false leaves the lidar pipeline (and FAST-LIO) to the navigation
+    # container, g1_bringup/nav_area.launch.py (docker/navigation).
+    with_perception = arg("perception").lower() == "true"
+    if with_perception:
+        robot.append(_include("g1_perception", "lidar_pipeline.launch.py",
+                              {"use_sim_time": "true", "cloud_in": "/livox/lidar"}))
+    if use_lio and with_perception:
         robot.append(_include("g1_perception", "lio.launch.py", {
             "profile": "sim", "use_sim_time": "true",
             "initial_x": spawn["spawn_x"], "initial_y": spawn["spawn_y"], "initial_yaw": spawn["spawn_yaw"],
@@ -173,6 +177,8 @@ def generate_launch_description():
                               description="false: robot + sensors only (run g1_navigation yourself)"),
         DeclareLaunchArgument("mapping_nav2", default_value="true", description="slam:=mapping: Nav2 on the growing map"),
         DeclareLaunchArgument("nav_ui", default_value="false"),
+        DeclareLaunchArgument("perception", default_value="true",
+                              description="Lidar pipeline (+ FAST-LIO with odom_source:=lio) here; false: in the navigation container"),
         DeclareLaunchArgument("odom_source", default_value="bridge", description="bridge | lio"),
         # Defaults match robocup2026_1's start_location.safe_place in
         # g1_navigation/maps/areas/areas_robocup2026_1.json.

@@ -1,0 +1,41 @@
+# Navigation area (see Dockerfile). Values come from .env, written by run.sh.
+services:
+  navigation:
+    container_name: homehumanoid-navigation
+    build:
+      context: ../..
+      dockerfile: docker/navigation/Dockerfile
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-roborregos/home2:cpu_base}
+    image: ${IMAGE_NAME:-roborregos/homehumanoid:navigation-cpu}
+    network_mode: host
+    ipc: host
+    privileged: true            # raw sockets / DDS on the G1's network
+    runtime: ${DOCKER_RUNTIME:-runc}
+    user: ${LOCAL_USER_ID:-1000}:${LOCAL_GROUP_ID:-1000}
+    volumes:
+      - ../../:/workspace/src         # the repo: maps are saved straight into src/g1_navigation/maps
+      - ./build:/workspace/build
+      - ./install:/workspace/install
+      - ./log:/workspace/log
+      - ./logs:/workspace/logs
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /dev:/dev
+    environment:
+      DISPLAY: ${DISPLAY:-}
+      QT_X11_NO_MITSHM: 1
+      TERM: xterm-256color
+      RCUTILS_COLORIZED_OUTPUT: "1"
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOG_DIR: /workspace/log/ros
+      GZ_PARTITION: ${GZ_PARTITION:-}
+      CYCLONE_INTERFACE: ${CYCLONE_INTERFACE:-}
+      CYCLONE_SHM: "0"
+      MAP_NAME: ${MAP_NAME:-g1_robocup2026_1}
+      G1_MAPS_DIR: /workspace/src/src/g1_navigation/maps
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    tty: true
+    stdin_open: true
+    working_dir: /workspace
+    command: bash -c "${COMMAND:-sleep infinity}"

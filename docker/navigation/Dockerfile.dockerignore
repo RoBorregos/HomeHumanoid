@@ -1,0 +1,6 @@
+# The build context is the repo root (for the manifests and fetch_lio.sh);
+# send only what the Dockerfile copies, not third_party/ or build trees.
+**
+!src/*/package.xml
+!vendor/home2/frida_interfaces/package.xml
+!third_party/fetch_lio.sh

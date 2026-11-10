@@ -29,8 +29,10 @@ MAP_NAME="${MAP_NAME:-robocup2026_1}"
 
 set +u
 source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
-[ -f "$REPO/third_party/lio_ws/install/setup.bash" ] && source "$REPO/third_party/lio_ws/install/setup.bash"
-source "$REPO/install/setup.bash"
+# Overridable for the navigation container (/home/ros/lio_ws, /workspace/install).
+LIO_SETUP="${G1_LIO_SETUP:-$REPO/third_party/lio_ws/install/setup.bash}"
+[ -f "$LIO_SETUP" ] && source "$LIO_SETUP"
+source "${G1_INSTALL_DIR:-$REPO/install}/setup.bash"
 set -u
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }

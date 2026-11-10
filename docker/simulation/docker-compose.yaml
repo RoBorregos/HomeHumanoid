@@ -1,0 +1,40 @@
+# Simulation area (see Dockerfile). Values come from .env, written by run.sh.
+services:
+  simulation:
+    container_name: homehumanoid-simulation
+    build:
+      context: ../..
+      dockerfile: docker/simulation/Dockerfile
+      args:
+        USER_UID: ${LOCAL_USER_ID:-1000}
+        USER_GID: ${LOCAL_GROUP_ID:-1000}
+    image: ${IMAGE_NAME:-roborregos/homehumanoid:simulation-cpu}
+    network_mode: host
+    ipc: host
+    runtime: ${DOCKER_RUNTIME:-runc}
+    user: ${LOCAL_USER_ID:-1000}:${LOCAL_GROUP_ID:-1000}
+    volumes:
+      - ../../:/workspace/src
+      - ./build:/workspace/build
+      - ./install:/workspace/install
+      - ./log:/workspace/log
+      - ./logs:/workspace/logs
+      - ./cache/gz:/home/ros/.gz
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      DISPLAY: ${DISPLAY:-}
+      QT_X11_NO_MITSHM: 1
+      TERM: xterm-256color
+      RCUTILS_COLORIZED_OUTPUT: "1"
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_LOG_DIR: /workspace/log/ros
+      GZ_PARTITION: ${GZ_PARTITION:-}
+      CYCLONE_INTERFACE: ${CYCLONE_INTERFACE:-}
+      MAP_NAME: ${MAP_NAME:-g1_robocup2026_1}
+      G1_LOG_DIR: /workspace/logs
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    tty: true
+    stdin_open: true
+    working_dir: /workspace
+    command: bash -c "${COMMAND:-sleep infinity}"
