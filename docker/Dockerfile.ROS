@@ -30,6 +30,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# unitree_sdk2 for g1_loco_bridge (real robot), at /usr/local where its
+# CMake config is found; the same commit as third_party/unitree_sdk2.
+ARG UNITREE_SDK2_COMMIT=8e1b927586712edd6a4c29d50dd52dff1e163439
+RUN git clone https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_sdk2 \
+    && git -C /tmp/unitree_sdk2 checkout ${UNITREE_SDK2_COMMIT} \
+    && cmake -S /tmp/unitree_sdk2 -B /tmp/unitree_sdk2/build -DBUILD_EXAMPLES=OFF \
+    && cmake --build /tmp/unitree_sdk2/build -j"$(nproc)" --target install \
+    && ldconfig && rm -rf /tmp/unitree_sdk2
+
 WORKDIR /ws
 
 # The workspace (src/, vendor/, third_party/) is mounted as a volume in
