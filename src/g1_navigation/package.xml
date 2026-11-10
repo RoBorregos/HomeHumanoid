@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>g1_navigation</name>
+  <version>0.0.1</version>
+  <description>
+    home2's navigation stack (nav_main + map_context) ported to the Unitree G1:
+    nav_central, semantic_nav, person_goal_smoother, table_docker, nav_ui and
+    map_area_tagger, with the same /navigation/* interface task_manager uses on
+    FRIDA, plus mapping/localization/navigation launch files and the G1's maps.
+    See docs/plan.md, M3/M4.
+  </description>
+  <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>frida_interfaces</exec_depend>
+  <exec_depend>frida_constants</exec_depend>
+  <exec_depend>g1_nav_overlay</exec_depend>
+  <exec_depend>g1_base_bridge</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>composition_interfaces</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-pyqt5</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

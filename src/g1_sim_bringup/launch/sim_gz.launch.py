@@ -1,21 +1,27 @@
-"""Track A: G1 (kinematic virtual base) in Gazebo Harmonic + Nav2, localizing
-against a pre-built map. Fase 4 of docs/plan.md — the autonomous-goal-reaching
-flow, built on the same world/spawn/bridge/Nav2 foundation sim_mapping.launch.py
-(Fase 2) uses.
+"""Track A: the G1 (kinematic virtual base) in Gazebo Harmonic with its 3D
+MID-360 stand-in, plus the G1 navigation stack (g1_navigation).
 
-Requires `./src/g1_description/scripts/vendor_g1.sh` to have been run (G1
-URDF/meshes) and `vendor/home2` to be a built submodule (nav_main,
-frida_gz_sim, map_context — see docs/plan.md's prerequisite section).
+This file starts the "robot": Gazebo, the spawned G1, ros_gz_bridge
+(/clock_gz -> clock_throttle -> /clock at 100 Hz, /sim/cmd_vel, /livox/lidar,
+/livox/imu), robot_state_publisher +
+base_link -> pelvis, the odometry source and g1_perception's lidar pipeline
+(/livox/points_filtered, /scan). Then, unless nav:=false, it includes
+  slam:=localization  g1_navigation navigation.launch.py mode:=gz (default)
+  slam:=mapping       g1_navigation mapping.launch.py mode:=gz
 
-Defaults everything to robocup2026_1 (vendored from home2, world + map +
-start pose all already exist) as the first smoke test — pass map_name:=
-and world:= to point at a different map once Fase 2/3 produce one for G1.
+odom_source:=bridge (default) is g1_base_bridge's dead reckoning of the
+commanded velocity, exact on this kinematic base. odom_source:=lio runs
+FAST-LIO on the simulated cloud + IMU instead (needs third_party/lio_ws), and
+the bridge's odometry goes to /odom_bridge for comparison.
+
+Requires src/g1_description/scripts/vendor_g1.sh (G1 URDF/meshes) and the
+vendor/home2 packages built (frida_gz_sim world, frida_interfaces).
+Defaults to robocup2026_1: home2's world, with the map and areas copied into
+g1_navigation/maps.
 """
 
 import os
-import tempfile
 
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -30,26 +36,8 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def _deep_merge(base, overlay):
-    """Recursively merge overlay dict into base dict (overlay wins).
-
-    Ported from vendor/home2/navigation/packages/nav_main/launch/omni_setup/
-    nav2_omni.launch.py — same pattern, applied here before handing the
-    result to stock nav2_bringup's navigation_launch.py instead of a
-    composable-node container (see docs/plan.md for why).
-    """
-    for k, v in overlay.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            _deep_merge(base[k], v)
-        else:
-            base[k] = v
-    return base
-
-
 def _resource_path():
-    paths = [
-        os.path.join(get_package_share_directory("frida_gz_sim"), "worlds"),
-    ]
+    paths = [os.path.join(get_package_share_directory("frida_gz_sim"), "worlds")]
     for prefix in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep):
         share = os.path.join(prefix, "share")
         if os.path.isdir(share):
@@ -60,56 +48,53 @@ def _resource_path():
     return os.pathsep.join(paths)
 
 
+def _include(pkg, launch_file, args):
+    return IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(get_package_share_directory(pkg), "launch", launch_file)),
+        launch_arguments=args.items(),
+    )
+
+
 def launch_setup(context, *args, **kwargs):
     nav_overlay_share = get_package_share_directory("g1_nav_overlay")
-    nav_main_share = get_package_share_directory("nav_main")
-    map_context_share = get_package_share_directory("map_context")
+    arg = lambda name: LaunchConfiguration(name).perform(context)  # noqa: E731
 
-    gui = LaunchConfiguration("gui").perform(context).lower() == "true"
-    start_gazebo = LaunchConfiguration("start_gazebo").perform(context).lower() == "true"
-    world = LaunchConfiguration("world").perform(context)
-    map_name = LaunchConfiguration("map_name").perform(context)
-    spawn_x = LaunchConfiguration("spawn_x").perform(context)
-    spawn_y = LaunchConfiguration("spawn_y").perform(context)
-    spawn_z = LaunchConfiguration("spawn_z").perform(context)
-    spawn_yaw = LaunchConfiguration("spawn_yaw").perform(context)
+    gui = arg("gui").lower() == "true"
+    start_gazebo = arg("start_gazebo").lower() == "true"
+    spawn = {k: arg(k) for k in ("spawn_x", "spawn_y", "spawn_z", "spawn_yaw")}
+    odom_source = arg("odom_source")
+    if odom_source not in ("bridge", "lio"):
+        raise RuntimeError(f"odom_source must be bridge or lio, got {odom_source!r}")
+    slam = arg("slam")
+    if slam not in ("localization", "mapping"):
+        raise RuntimeError(f"slam must be localization or mapping, got {slam!r}")
 
     gazebo_actions = []
     if start_gazebo:
-        gz_cmd = ["gz", "sim", "-r", "-v", "3", world]
+        gz_cmd = ["gz", "sim", "-r", "-v", "3", arg("world")]
         if not gui:
             gz_cmd[2:2] = ["-s", "--headless-rendering"]
         # DISPLAY unset + EGL_PLATFORM=surfaceless keeps Ogre2 off the X11
         # EGL platform, which fails on this Orin ("failed to create dri2
-        # screen"). The ~0.003 real_time_factor once blamed on that, and on
-        # running gz sim inside this launch tree, was the robot spawned at
-        # z=0 with its legs buried in the floor (docs/plan.md, "M2a continued
-        # — third Orin session"): RTF is ~1.0 from here at spawn_z 0.79.
+        # screen"). The ~0.003 real_time_factor once blamed on that was the
+        # robot spawned at z=0 with its legs in the floor (docs/plan.md):
+        # RTF is ~1.0 at spawn_z 0.79, also with the 3D lidar (2026-11-10).
         gz_env = dict(os.environ)
         gz_env.pop("DISPLAY", None)
         gz_env["GZ_SIM_RESOURCE_PATH"] = _resource_path()
         gz_env["EGL_PLATFORM"] = "surfaceless"
         gazebo_actions.append(ExecuteProcess(cmd=gz_cmd, output="screen", env=gz_env))
 
-    description_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory("g1_description"), "launch", "description.launch.py"
-            )
-        )
-    )
-
-    spawn = Node(
+    description = _include("g1_description", "description.launch.py", {"use_sim_time": "true"})
+    spawn_node = Node(
         package="ros_gz_sim",
         executable="create",
         output="screen",
         arguments=[
-            "-topic", "robot_description",
-            "-name", "g1",
-            "-x", spawn_x, "-y", spawn_y, "-z", spawn_z, "-Y", spawn_yaw,
+            "-topic", "robot_description", "-name", "g1",
+            "-x", spawn["spawn_x"], "-y", spawn["spawn_y"], "-z", spawn["spawn_z"], "-Y", spawn["spawn_yaw"],
         ],
     )
-
     bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
@@ -119,7 +104,9 @@ def launch_setup(context, *args, **kwargs):
             {"use_sim_time": True},
         ],
     )
-
+    # Gazebo's /clock (every step) -> /clock at 100 Hz, see clock_throttle.cpp.
+    clock_throttle = Node(package="g1_sim_bringup", executable="clock_throttle", output="screen")
+    use_lio = odom_source == "lio"
     base_bridge = Node(
         package="g1_base_bridge",
         executable="g1_base_bridge",
@@ -128,101 +115,74 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{
             "backend": "gazebo",
             "use_sim_time": True,
-            "spawn_x": float(spawn_x),
-            "spawn_y": float(spawn_y),
-            "spawn_yaw": float(spawn_yaw),
+            "spawn_x": float(spawn["spawn_x"]),
+            "spawn_y": float(spawn["spawn_y"]),
+            "spawn_yaw": float(spawn["spawn_yaw"]),
+            "publish_tf": not use_lio,
+            "odom_out_topic": "/odom_bridge" if use_lio else "/odom",
         }],
     )
+    perception = _include("g1_perception", "lidar_pipeline.launch.py",
+                          {"use_sim_time": "true", "cloud_in": "/livox/lidar"})
+    robot = [bridge, clock_throttle, base_bridge, perception]
+    if use_lio:
+        robot.append(_include("g1_perception", "lio.launch.py", {
+            "profile": "sim", "use_sim_time": "true",
+            "initial_x": spawn["spawn_x"], "initial_y": spawn["spawn_y"], "initial_yaw": spawn["spawn_yaw"],
+        }))
 
-    localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(nav_main_share, "launch", "omni_setup", "localization.launch.py")
-        ),
-        launch_arguments={
-            "use_sim_time": "true",
-            "params_file": os.path.join(nav_overlay_share, "config", "mapper_params_sim.yaml"),
-            "map": os.path.join(map_context_share, "maps", map_name),
-            "use_static_map_server": "false",
-        }.items(),
-    )
+    nav = []
+    if arg("nav").lower() == "true":
+        if slam == "mapping":
+            nav.append(_include("g1_navigation", "mapping.launch.py",
+                                {"mode": "gz", "nav2": arg("mapping_nav2"), "nav_ui": arg("nav_ui")}))
+        else:
+            nav.append(_include("g1_navigation", "navigation.launch.py", {
+                "mode": "gz", "map_name": arg("map_name"), "nav_ui": arg("nav_ui"),
+                "start_x": spawn["spawn_x"], "start_y": spawn["spawn_y"], "start_yaw": spawn["spawn_yaw"],
+            }))
 
-    # Deep-merge nav2_g1.yaml + nav2_g1_sim_overlay.yaml into one tempfile,
-    # then hand it to stock nav2_bringup (autostart:true — no nav_central.py
-    # lifecycle trigger needed, see docs/plan.md).
-    with open(os.path.join(nav_overlay_share, "config", "nav2_g1.yaml")) as f:
-        merged_params = yaml.safe_load(f)
-    with open(os.path.join(nav_overlay_share, "config", "nav2_g1_sim_overlay.yaml")) as f:
-        _deep_merge(merged_params, yaml.safe_load(f))
-    merged_path = os.path.join(tempfile.gettempdir(), "nav2_g1_merged.yaml")
-    with open(merged_path, "w") as f:
-        yaml.safe_dump(merged_params, f, default_flow_style=False, sort_keys=False)
-
-    nav2 = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("nav2_bringup"), "launch", "navigation_launch.py")
-        ),
-        launch_arguments={
-            "params_file": merged_path,
-            "use_sim_time": "true",
-            "autostart": "true",
-        }.items(),
-    )
-
-    initial_pose = Node(
-        package="g1_base_bridge",
-        executable="initial_pose",
-        output="screen",
-        parameters=[{"x": float(spawn_x), "y": float(spawn_y), "yaw": float(spawn_yaw)}],
-    )
-
-    # Staggered startup: gives gazebo a few seconds to finish loading the
-    # world before spawn/bridge/slam/nav2 start.
+    # Staggered startup: gives gazebo a few seconds to load the world before
+    # spawn/bridge, and the sensors a few more before SLAM and Nav2.
     return [
         *gazebo_actions,
-        TimerAction(period=4.0, actions=[description_launch, spawn]),
-        TimerAction(period=6.0, actions=[bridge, base_bridge]),
-        TimerAction(period=8.0, actions=[localization]),
-        TimerAction(period=12.0, actions=[nav2]),
-        # Give slam_toolbox + nav2's lifecycle manager time to autostart
-        # before seeding the initial pose (empirical delay, not tied to any
-        # specific startup-sequencing mechanism since there's no nav_central
-        # gate here — see docs/plan.md).
-        TimerAction(period=20.0, actions=[initial_pose]),
+        TimerAction(period=4.0, actions=[description, spawn_node]),
+        TimerAction(period=6.0, actions=robot),
+        TimerAction(period=9.0, actions=nav),
     ]
 
 
 def generate_launch_description():
-    return LaunchDescription(
-        [
-            DeclareLaunchArgument("gui", default_value="true"),
-            DeclareLaunchArgument(
-                "start_gazebo",
-                default_value="true",
-                description="Start gz sim from this launch file. Set false to attach to a "
-                            "Gazebo you started yourself (DISPLAY unset, "
-                            "EGL_PLATFORM=surfaceless).",
+    return LaunchDescription([
+        DeclareLaunchArgument("gui", default_value="true"),
+        DeclareLaunchArgument(
+            "start_gazebo", default_value="true",
+            description="Start gz sim from this launch file. false attaches to a Gazebo you started yourself "
+                        "(DISPLAY unset, EGL_PLATFORM=surfaceless).",
+        ),
+        DeclareLaunchArgument(
+            "world",
+            default_value=os.path.join(
+                get_package_share_directory("frida_gz_sim"), "worlds", "arena_robocup2026_1.sdf"
             ),
-            DeclareLaunchArgument(
-                "world",
-                default_value=os.path.join(
-                    get_package_share_directory("frida_gz_sim"), "worlds", "arena_robocup2026_1.sdf"
-                ),
-            ),
-            DeclareLaunchArgument(
-                "map_name",
-                default_value="robocup2026_1",
-                description="Name under map_context/maps/ (no extension) to localize against.",
-            ),
-            # Defaults match robocup2026_1's start_location.safe_place pose
-            # (see mapper_params_sim.yaml's map_start_pose) — keep all three
-            # in sync if this changes.
-            DeclareLaunchArgument("spawn_x", default_value="4.17764"),
-            DeclareLaunchArgument("spawn_y", default_value="-11.69743"),
-            DeclareLaunchArgument(
-                "spawn_z", default_value="0.79",
-                description="Pelvis height with the legs locked straight. Must keep the feet above the floor: at 0.0 the merged leg meshes are buried and every physics step costs ~290ms (real_time_factor ~0.003).",
-            ),
-            DeclareLaunchArgument("spawn_yaw", default_value="-1.989"),
-            OpaqueFunction(function=launch_setup),
-        ]
-    )
+        ),
+        DeclareLaunchArgument("map_name", default_value=os.environ.get("MAP_NAME", "robocup2026_1"),
+                              description="Map in g1_navigation's maps dir to localize against"),
+        DeclareLaunchArgument("slam", default_value="localization", description="localization | mapping"),
+        DeclareLaunchArgument("nav", default_value="true",
+                              description="false: robot + sensors only (run g1_navigation yourself)"),
+        DeclareLaunchArgument("mapping_nav2", default_value="true", description="slam:=mapping: Nav2 on the growing map"),
+        DeclareLaunchArgument("nav_ui", default_value="false"),
+        DeclareLaunchArgument("odom_source", default_value="bridge", description="bridge | lio"),
+        # Defaults match robocup2026_1's start_location.safe_place in
+        # g1_navigation/maps/areas/areas_robocup2026_1.json.
+        DeclareLaunchArgument("spawn_x", default_value="4.17764"),
+        DeclareLaunchArgument("spawn_y", default_value="-11.69743"),
+        DeclareLaunchArgument(
+            "spawn_z", default_value="0.79",
+            description="Pelvis height with the legs locked straight. Must keep the feet above the floor: "
+                        "at 0.0 the merged leg meshes are buried and every physics step costs ~290ms.",
+        ),
+        DeclareLaunchArgument("spawn_yaw", default_value="-1.989"),
+        OpaqueFunction(function=launch_setup),
+    ])

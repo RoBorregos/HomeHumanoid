@@ -5,15 +5,18 @@
   <version>0.0.1</version>
   <description>
     Orchestration launch files per simulation track and workflow:
-    sim_gz.launch.py (Track A, Fase 4 — Nav2 goal-following against a
-    pre-built map), sim_mapping.launch.py (Track A, Fase 2 — slam_toolbox
-    mapping), and sim_mujoco.launch.py (Track B, unitree_mujoco +
-    unitree_rl_lab). See docs/plan.md.
+    sim_gz.launch.py (Track A: Gazebo + 3D MID-360 stand-in + g1_navigation,
+    localization or slam:=mapping), sim_mapping.launch.py (its mapping
+    shortcut), and sim_mujoco.launch.py (Track B, unitree_mujoco +
+    unitree_rl_lab + g1_navigation on a static map). See docs/plan.md.
   </description>
   <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rosgraph_msgs</depend>
 
   <exec_depend>g1_description</exec_depend>
   <exec_depend>g1_base_bridge</exec_depend>
@@ -22,6 +25,8 @@
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
   <exec_depend>g1_nav_overlay</exec_depend>
+  <exec_depend>g1_navigation</exec_depend>
+  <exec_depend>g1_perception</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
@@ -29,9 +34,7 @@
   <!-- From vendor/home2 (submodule — see vendor/README.md). Resolved by ROS
        package name, not vendored source; this package only depends on them
        being built, not on home2's own repo structure. -->
-  <exec_depend>nav_main</exec_depend>
   <exec_depend>frida_gz_sim</exec_depend>
-  <exec_depend>map_context</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

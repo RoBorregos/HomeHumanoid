@@ -57,7 +57,9 @@ cmake -S "${WS}/deps/Livox-SDK2" -B "${WS}/deps/Livox-SDK2/build" \
 cmake --build "${WS}/deps/Livox-SDK2/build" -j"${JOBS}"
 cmake --install "${WS}/deps/Livox-SDK2/build" >/dev/null
 
+set +u  # ROS setup scripts read unset variables
 source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+set -u
 cd "${WS}"
 CMAKE_PREFIX_PATH="${SDK_PREFIX}:${CMAKE_PREFIX_PATH:-}" \
 LIBRARY_PATH="${SDK_PREFIX}/lib:${LIBRARY_PATH:-}" \

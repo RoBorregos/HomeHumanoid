@@ -129,14 +129,26 @@ Copy `robots/g1_description/g1_29dof.urdf` (+ meshes) into
 meshes (used above for the MuJoCo track) — `unitree_ros` is only needed for
 the separate URDF used by Gazebo/Track A.
 
-## unitree_sdk2_python (M2b, `g1_base_bridge` Track B)
+## unitree_sdk2_python (not needed)
+
+Track B ended up in C++ (`g1_rl_bridge`, `g1_loco_bridge`, against the
+`unitree_sdk2` above), so the Python SDK is not used anywhere.
+
+## lio_ws: MID-360 driver + FAST-LIO (M3/M5)
 
 ```bash
-git clone https://github.com/unitreerobotics/unitree_sdk2_python third_party/unitree_sdk2_python
-cd third_party/unitree_sdk2_python && pip3 install -e .
+third_party/fetch_lio.sh          # clone (pinned) + build into third_party/lio_ws
+source third_party/lio_ws/install/setup.bash
 ```
 
-Needed by `g1_base_bridge`'s `rl_policy` backend (the hybrid rclpy +
-raw-DDS bridge, see its module docstring) — not yet installed/tested on the
-Orin as of this writing; the exact `unitree_sdk2py` import paths used in
-that file should be verified against whatever version gets installed.
+Clones Livox-SDK2 (installed into `lio_ws/sdk`, no root), `livox_ros_driver2`
+and FAST-LIO's ROS2 branch at fixed commits, and builds them as a colcon
+overlay. Needed for:
+
+- `g1_bringup/robot.launch.py` (the real MID-360 driver; FAST-LIO with
+  `odom_source:=lio`, the default);
+- `g1_perception`'s `livox_custom_to_pc2` (only built when `livox_ros_driver2`
+  is found, so source the overlay before `colcon build`);
+- `sim_gz.launch.py odom_source:=lio` (FAST-LIO on the simulated cloud + IMU).
+
+Gazebo mapping/navigation with the default bridge odometry does not need it.

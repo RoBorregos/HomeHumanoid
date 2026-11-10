@@ -1,0 +1,28 @@
+# slam_toolbox LOCALIZATION against a saved G1 map, robot and sim.
+# g1_navigation/launch/navigation.launch.py sets map_file_name and
+# map_start_pose (from the map's areas start_location, or the sim spawn).
+slam_toolbox:
+  ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+
+    mode: localization
+    map_file_name: ""  # set by g1_navigation from map_name
+    # Overridden by the launch file from the start pose (sim spawn, or the
+    # map's start_location); re-seed any time with nav_ui / /initialpose.
+    map_start_pose: [0.0, 0.0, 0.0]
+
+    resolution: 0.05
+    max_laser_range: 20.0
+    minimum_time_interval: 0.3
+    transform_timeout: 0.2
+    transform_publish_period: 0.05
+    tf_buffer_duration: 30.0
+
+    do_loop_closing: true
+    loop_search_maximum_distance: 3.0

@@ -4,13 +4,10 @@
   <name>g1_base_bridge</name>
   <version>0.0.1</version>
   <description>
-    Bridge between the cmd_vel Nav2 produces and the G1's active locomotion
-    backend: Track A (Gazebo's VelocityControl plugin, idle legs) or Track B
-    (unitree_rl_lab's RL walking policy, driven via the rt/lowstate
-    wireless_remote relay-with-override pattern — see docs/plan.md,
-    "M1 findings"). Track B requires unitree_sdk2_python (pip install, not a
-    rosdep key) in addition to the ROS 2 deps below, since this package is a
-    hybrid rclpy + raw-DDS process.
+    Track A bridge: Nav2's cmd_vel -> Gazebo's VelocityControl plugin (idle
+    legs), with a stale-command watchdog and dead-reckoned /odom +
+    odom -> base_link. Also initial_pose (seeds /initialpose). Track B (MuJoCo)
+    is g1_rl_bridge and the real robot is g1_loco_bridge. See docs/plan.md.
   </description>
   <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
   <license>Apache-2.0</license>

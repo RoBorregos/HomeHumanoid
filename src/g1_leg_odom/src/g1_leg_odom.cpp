@@ -1,4 +1,4 @@
-// Standalone leg-inertial odometry node: rt/lowstate -> /odom + odom -> pelvis.
+// Standalone leg-inertial odometry node: rt/lowstate -> /odom + odom -> base_link.
 // The estimator and its limits are described in leg_odometry.hpp.
 //
 // For the real robot, where nothing else relays rt/lowstate. In the MuJoCo sim,

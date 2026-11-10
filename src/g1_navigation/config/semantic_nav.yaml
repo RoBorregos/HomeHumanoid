@@ -1,0 +1,34 @@
+# Parameters for semantic_nav_node.py (ported from home2 nav_main/config/semantic_nav.yaml)
+semantic_nav:
+  ros__parameters:
+    # Empty -> MAP_NAME environment variable
+    map_name: ""
+
+    # Retry until nav_central serves the areas
+    areas_retry_period: 10.0
+
+    # Scanned = within scan_radius of the tagged pose and facing it within the yaw tolerance
+    scan_radius: 1.0
+    scan_yaw_tolerance_deg: 35.0
+    scan_check_period: 1.0
+
+    # Scan log. "" -> /workspace/log/semantic_nav, else ~/.ros/semantic_nav
+    snapshot_dir: ""
+
+    base_frame: base_link
+    # PlanPatrol.arm_poses entry for every viewpoint. FRIDA answers its xArm
+    # "nav_pose"; the G1 has no named arm poses yet.
+    arm_pose: ""
+    snapshot_period: 10.0
+
+    marker_period: 2.0
+
+    # mode "quick": surfaces per area
+    quick_mode_per_area: 1
+
+    # Relocate viewpoints that sit inside the costmap inflation
+    validate_with_costmap: true
+    viewpoint_check_radius: 0.25    # m, ~half the G1 footprint's width (nav2_g1.yaml) + margin
+    viewpoint_max_cost: 50          # same threshold as nav_central._grid_cell_free
+    viewpoint_max_shift: 0.6        # m the replacement pose may move outward
+    viewpoint_probe_distance: 0.8   # m ahead of a tagged pose where the furniture is

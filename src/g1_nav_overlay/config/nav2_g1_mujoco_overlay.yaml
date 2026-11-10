@@ -39,7 +39,11 @@ controller_server:
       max_angular_accel: 6.0
       allow_reversing: false
       transform_tolerance: 0.2
-      min_approach_linear_velocity: 0.12
+      # 0.18, not 0.12: on the final approach the policy barely moves at
+      # 0.12, so the robot stopped ~0.35 m out, right on xy_goal_tolerance,
+      # and flipped between turning to the path and to the goal heading for
+      # minutes (laundry, 2026-11-10, with leg odometry).
+      min_approach_linear_velocity: 0.18
       approach_velocity_scaling_dist: 0.5
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
@@ -56,12 +60,16 @@ local_costmap:
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
+      # No walls exist in this scene: keep the old small circle, not the polygon.
+      footprint: "[]"
       robot_radius: 0.2
 
 global_costmap:
   global_costmap:
     ros__parameters:
       plugins: ["static_layer", "inflation_layer"]
+      # No walls exist in this scene: keep the old small circle, not the polygon.
+      footprint: "[]"
       robot_radius: 0.2
       # Keeps plans in the middle of a passage, away from the inscribed band.
       inflation_layer:

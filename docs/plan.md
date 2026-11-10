@@ -62,7 +62,7 @@ M1 was run on the team's Jetson Orin (HRI Orin, ssh over Tailscale). Key correct
 
 ## SLAM / localization
 
-Use `slam_toolbox` (matches home2's current default, which is itself moving away from RTAB-Map) fed by a 2D scan generated from the G1's Livox MID-360 point cloud via `pointcloud_to_laserscan`. The forward-facing D435i remains available for vision-based costmap layers later. 3D SLAM approaches like Fast-LIO/NDT (as used by community G1 nav repos) are deferred to an optional later milestone — not required to prove Nav2 goal-following in sim.
+Implemented in M3 (see "M3/M4" below): `slam_toolbox` 2D, fed by `/scan` projected from the MID-360's 3D cloud between 0.10 and 1.50 m over the floor, so the maps stay in home2's format. A `VoxelLayer` on the cloud covers obstacles that a 2D map misses. FAST-LIO (MID-360 cloud + its IMU) gives odometry on the real robot, where the leg odometry drifts in yaw; in sim the bridges' odometry is exact and FAST-LIO is optional. The D435i remains available for vision-based costmap layers later.
 
 ## Milestones
 
@@ -76,9 +76,9 @@ Use `slam_toolbox` (matches home2's current default, which is itself moving away
   - Fase 3 (tag) reuses `vendor/home2/navigation/packages/map_context/scripts/map_area_tagger.py` **unmodified** — a standalone PyQt5 app with no ROS/FRIDA coupling, loads a `.pgm`/`.yaml`, exports `areas.json`.
   - See `docs/plan.md`'s own history is superseded here by the fuller ephemeral plan this was implemented from; the concrete file list and design rationale live in git history / the implementation itself.
 - **M2b — Real locomotion (Track B, MuJoCo + RL policy). Done in simulation, see "M2b — Track B implemented" below; it is `g1_rl_bridge`, not `g1_base_bridge`, and odometry is still MuJoCo ground truth.** Extend `g1_base_bridge` to target `unitree_rl_lab`'s command interface instead of `VelocityControl`; wire odometry from `SportModeState` into TF/`nav_msgs/Odometry`. Deliverable: the same goal-following demo, but the G1 actually walks via the RL policy in MuJoCo, driven end-to-end by Nav2.
-- **M3 — SLAM-built map + autonomous exploration.** Simulate the Livox MID-360 (via `pointcloud_to_laserscan`) and/or the D435i on whichever backend proved more stable in M2; run `slam_toolbox` in mapping mode, save a map, rerun Nav2 against it. Deliverable: the G1 autonomously maps and navigates a simulated scenario from scratch.
-- **M4 — Integration with home2's `task_manager`/vision/HRI.** Wire `task_manager`'s orchestration (first confirm its internal mechanism: BT, state machine, or LLM planner) to emit nav goals to the G1 stack instead of FRIDA's; bring in vision (YOLO/VLM) and HRI (STT/NLP) unmodified, confirming they're robot-agnostic. Deliverable: a GPSR-style demo ("go to X, find Y") running on the G1 sim stack.
-- **M5 — Sim-to-real toward the physical G1.** Since the hardware is already owned, this phase is in scope for this cycle: replace MuJoCo with real `unitree_sdk2`/DDS on the robot, validate the same `g1_base_bridge` and Nav2 configs against real sensor data and real locomotion latency/safety margins.
+- **M3 — SLAM-built map + autonomous exploration. Done in Gazebo (2026-11-10), see "M3/M4" below: the G1 mapped the arena with its own 3D lidar and navigated it, 14/14 goals.** Simulate the Livox MID-360 (via `pointcloud_to_laserscan`) and/or the D435i on whichever backend proved more stable in M2; run `slam_toolbox` in mapping mode, save a map, rerun Nav2 against it. Deliverable: the G1 autonomously maps and navigates a simulated scenario from scratch.
+- **M4 — Integration with home2's `task_manager`/vision/HRI. Navigation part done (2026-11-10): home2's `nav_central`/`semantic_nav` ported into `g1_navigation`, and `task_manager`'s unmodified `NavigationTasks` drives the G1. Vision/HRI not yet run on top.** Wire `task_manager`'s orchestration (first confirm its internal mechanism: BT, state machine, or LLM planner) to emit nav goals to the G1 stack instead of FRIDA's; bring in vision (YOLO/VLM) and HRI (STT/NLP) unmodified, confirming they're robot-agnostic. Deliverable: a GPSR-style demo ("go to X, find Y") running on the G1 sim stack.
+- **M5 — Sim-to-real toward the physical G1. Bringup written (`g1_bringup/robot.launch.py`: MID-360 driver, FAST-LIO, `g1_loco_bridge`, navigation), not run on hardware.** Since the hardware is already owned, this phase is in scope for this cycle: replace MuJoCo with real `unitree_sdk2`/DDS on the robot, validate the same `g1_base_bridge` and Nav2 configs against real sensor data and real locomotion latency/safety margins.
 
 ## Directory structure (HomeHumanoid)
 
@@ -462,3 +462,47 @@ Open question 5 for the real robot: `/odom` on Track B came from MuJoCo's ground
 
 `cmd_vel -> g1::LocoClient::SetVelocity` at `command_rate` (10 Hz), with `command_duration` 0.3 s as the dead-man: if the process dies the robot stops on its own. Stale or missing `cmd_vel` sends zero once, then nothing, so the remote still works while Nav2 is idle. Conservative clamps (`max_vx` 0.3, `max_vy` 0.2, `max_wz` 0.3), `StopMove()` on shutdown, and the same leg odometry with `~/reset_odom`. It does not change the FSM unless `auto_start:=true`; put the robot in walking mode with the remote. It builds but has never run against a robot: first test on the gantry, with the remote's emergency stop in hand. The sim compensation tables are deliberately not used.
 
+
+## M3/M4 — home2's navigation stack on the G1, mapped with the 3D lidar (2026-11-10)
+
+**Result (Gazebo, `robocup2026_1` arena):** the G1 mapped the arena with its own simulated MID-360, and then navigated it through home2's own interface: **14/14 `go_to_map_area` goals SUCCEEDED** over two laps of 7 locations, localization within 5 cm of Gazebo ground truth at every stop, final position 0.04–0.36 m from the tagged pose. home2's `task_manager` `NavigationTasks`, unmodified, ran `retrieve_areas`, `get_current_pose`, `move_to_location`, `get_path_info` and `plan_patrol` against it. `is_door_open`, `approach_point`, `get_area_for_point`, `query_path` and follow mode on/off also work.
+
+**MuJoCo (Track B) through the same stack** (`sim_mujoco.launch.py` now includes `g1_navigation mode:=mujoco`: static map, `nav_central`, RPP): with `odom_source:=ground_truth`, **4/4 goals SUCCEEDED** walking (kitchen 126 s, living_room 82 s, exit 32 s, start_location 362 s). With the leg odometry (`odom_source:=leg`, the default), the estimate drifted **2.6–4.9% of the distance walked** (0.8 m after ~31 m, yaw error ~0 after the fix below), and `laundry` timed out twice: the robot stopped ~0.35–0.4 m short and RPP alternated between turning in place and driving with the opposite turn. This is the measurement docs/plan.md asked for: without a lidar localizer the leg odometry is not enough for tight goals, which is what FAST-LIO / slam_toolbox are for on the robot.
+- `reset_odom` now re-bases `/odom_ground_truth` too: the robot turned 32° while the band lowered it, and `odom_error.py` was reporting that as a constant yaw error.
+- `min_approach_linear_velocity` 0.12 → 0.18 in the MuJoCo overlay (the policy barely moves at 0.12 on the final approach). Not enough alone for `laundry` with leg odometry.
+
+**What was built:**
+
+| Piece | Package | Notes |
+|---|---|---|
+| 3D MID-360 + IMU in Gazebo | `g1_description` | `gpu_lidar` 720×32, −52..+7° (head mount, upside down), 10 Hz; IMU 200 Hz. RTF stayed ~1.0. Bridged as `/livox/lidar`, `/livox/imu`, the real driver's names |
+| `base_link` | `g1_description` | Planar footprint, parent of `pelvis` (static, z 0.79). Every odometry source publishes `odom -> base_link`, which every home2 node assumes |
+| Lidar pipeline | `g1_perception` | CropBox removes the body (forearms reach 0.38 m in front) → `/livox/points_filtered` → `pointcloud_to_laserscan` 0.10–1.50 m → `/scan` |
+| FAST-LIO | `g1_perception` | `lio.launch.py` + `lio_odom_adapter.py` (body pose → planar `odom -> base_link`), `livox_custom_to_pc2`. **Not built or run yet**, see below |
+| Navigation | `g1_navigation` | Ports of `nav_central`, `semantic_nav_node` + `semantic/`, `person_goal_smoother`, `table_docker`, `nav_ui`, `map_area_tagger`; `navigation.launch.py` (modes `gz`, `mujoco`, `robot`), `mapping.launch.py`, `slam.launch.py`, `run_nav.sh`, `nav_client_check.py` |
+| Real robot | `g1_bringup` | `robot.launch.py`: driver, pipeline, LIO, `g1_loco_bridge` (new `publish_tf`/`odom_topic`), navigation |
+
+**Changes to home2's code in the port** (each file's header lists them): parameters for `base_frame`, `scan_topic`, `required_topics`/`required_frames` (FRIDA waits for its xArm's `link_eef`); RTAB-Map branch removed; `check_door` uses an angular window (±15°) instead of beam indices for FRIDA's 501-beam scan; maps in `G1_MAPS_DIR` (default `src/g1_navigation/maps`) instead of `/workspace/...`; follow mode hides the voxel layer instead of the ZED layer and also sets RPP's speed. **Bug fixed, also present in home2:** `send_nav_goal` assigned `goal_msg.behaivor_tree`, which raises as soon as a behavior tree is passed (`go_to_pose` with a BT, follow).
+
+**Findings, in the order they appeared:**
+
+1. **FRIDA's map doesn't work for the G1.** Localizing against `robocup2026_1` (built with FRIDA's 2D lidars ~0.3 m high) put the robot 0.55 m and 20° off at spawn, and `query_path` failed. The projected 3D scan sees things at other heights. Mapping with the G1's own sensor fixed it: on `g1_robocup2026_1` localization starts exact and stays within 5 cm. 100% of the G1 map's walls are within 0.2 m of FRIDA's, so the map frame is the world frame and FRIDA's area polygons were reused as `areas_g1_robocup2026_1.json`. **Map each arena with the G1.**
+2. **Gazebo's `/clock` at ~870 Hz cost every Python node 40–90% of a core** (even `initial_pose`), and slam_toolbox's `map -> odom` lagged ~0.5 s, aborting goals with "Transform data too old". `clock_throttle` (g1_sim_bringup) republishes it at 100 Hz; slam's TF went to 20 Hz. Sim-only tolerance 0.6 s in `nav2_g1_sim_overlay.yaml`.
+3. **The arena exit door (~0.8 m) stalled the robot** ("Failed to make progress"): a 0.3 m circle left a 1–2 cell lane. Fixed with a polygon footprint (front 0.40, back −0.20, ±0.24 m, from the sim lidar returns of the arms) and `consider_footprint: true`. The inflation radius then has to cover the circumscribed radius (0.49 m): 0.55, cost scaling 5.0. Exit then took 24–27 s.
+4. Lethal blocks in free space left over after localization corrections, never cleared: obstacle layers now raytrace (clear) to 6 m and mark to 3 m.
+5. `slam_toolbox` with `respawn` kept a SIGINT'd launch alive; respawn is now robot-only.
+
+**Not done / not verified:**
+- **FAST-LIO and the Livox driver were never built**: `third_party/fetch_lio.sh` cloned them but its build was blocked by the session's permission rules. Run it on the Orin, then test `sim_gz.launch.py odom_source:=lio` against ground truth before trusting it on the robot.
+- `g1_bringup/robot.launch.py` has only been launched without hardware (it stops with "livox_ros_driver2 not found"). On the robot, check first: the MID-360 orientation (the URDF says upright, the sim models it inverted; `/livox/imu` shows which), the crop box against the real arm pose, the footprint, and `host_ip`/`network_interface`.
+- `table_docker` is ported but off by default and untested with legs.
+- Vision/HRI on top of the G1 stack, and a full task (GPSR) end to end.
+- `nav_central` and `semantic_nav` still use ~50% of a core each in sim (Python TF listener and costmap subscriptions, same code as home2).
+
+**Map → tag → navigate:** see README.md. Maps live in `src/g1_navigation/maps`; `g1_robocup2026_1.posegraph` is 26 MB because the mapping session was long, so remap shorter if repo size matters.
+
+## `./run.sh` and the Nav2 tour with the new leg odometry (2026-11-10)
+
+`./run.sh` at the repo root is now the entry point, in home2's shape: `./run.sh sim|mujoco|robot [--mapping|--nav] [flags]`, plus `--save-map`, `--tagger`, `--ui`, `--check`, `--odom-error`, `--status`, `--stop`, `--build`. See README.md. Run on the Orin: `--help`, `--status`, `--stop` and `./run.sh mujoco -d`, which brought up Xvfb, `unitree_mujoco`, `g1_ctrl` and the launch file, and released the band with the robot standing. **`./run.sh sim` and `./run.sh robot` have not been run**: they only assemble the arguments of launch files that were run by hand before.
+
+**The Nav2 tour in MuJoCo with the load-based leg odometry did not complete, and not because of the odometry.** From the spawn pose on `g1_robocup2026_1`, the planner could not find a path to `laundry` ("Failed to create plan with tolerance", 83 times, 16 goal retries) and the robot only moved through recoveries. Drift over those 8 m of recoveries was 0.17 m (2%). The morning's 4/4 run with ground-truth odometry started with `kitchen` and never planned to `laundry` from the spawn, so the earlier "laundry timed out with leg odometry" may have been this planner failure rather than drift. Not root-caused: check the global costmap around the spawn pose with the polygon footprint and 0.55 m inflation.

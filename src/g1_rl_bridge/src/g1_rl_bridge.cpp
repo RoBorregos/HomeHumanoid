@@ -23,7 +23,7 @@
 // Odometry: unitree_mujoco publishes the IMU site's world position and velocity
 // on rt/sportmodestate using the go2 message type, even for the G1. Yaw comes
 // from the IMU in rt/lowstate. That is ground truth the real robot doesn't have.
-// odom_source selects what drives /odom and odom -> pelvis:
+// odom_source selects what drives /odom and odom -> base_link:
 //   leg (default): g1_leg_odom's estimator, from joint angles and the IMU as on
 //     the robot, fed from this node's own rt/lowstate subscription. Ground truth
 //     goes to /odom_ground_truth, without TF, to measure the estimator's drift.
@@ -148,8 +148,14 @@ public:
                                std_srvs::srv::Trigger::Response::SharedPtr res) {
           std::lock_guard<std::mutex> l(mutex_);
           leg_odom_->reset();
+          // Re-base the ground truth too. Its origin was taken at startup, and
+          // the robot turns while the band lowers it (32 deg once, 2026-11-10):
+          // the estimate restarts at the spawn yaw, so without this
+          // /odom_ground_truth stays rotated against /odom and odom_error.py
+          // reports that offset as drift.
+          origin_set_ = false;
           res->success = true;
-          res->message = "leg odometry reset to the spawn pose";
+          res->message = "leg odometry and ground-truth origin reset to the spawn pose";
           RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
         });
     }

@@ -11,7 +11,9 @@
 # g1_base_bridge's module docstring. /odom is published directly by
 # g1_base_bridge instead, dead-reckoned from the same cmd_vel it relays.
 
-- ros_topic_name: /clock
+# /clock_gz, not /clock: g1_sim_bringup's clock_throttle republishes it on
+# /clock at 100 Hz (Gazebo publishes every ~1 ms step, see its source).
+- ros_topic_name: /clock_gz
   gz_topic_name: /clock
   ros_type_name: rosgraph_msgs/msg/Clock
   gz_type_name: gz.msgs.Clock

@@ -1,15 +1,18 @@
-# slam_toolbox MAPPING (build a new map from scratch) for G1 in sim.
+# slam_toolbox MAPPING (build a new map from scratch) for the G1, sim and robot.
+#
+# Input is /scan, projected by g1_perception from the 3D MID-360 between 0.10
+# and 1.50 m over the floor: walls, furniture legs and table edges all end up
+# in the 2D map, so home2's map tools (map_area_tagger, areas.json, nav_ui)
+# keep working. Odometry under it is the bridge's (sim) or FAST-LIO (robot).
 #
 # Ported from vendor/home2/navigation/packages/nav_main/config/omni_config/
 # mapper_params_online_async.yaml, loaded by vendor/home2/navigation/packages/
 # nav_main/launch/omni_setup/slam.launch.py (included unmodified — see
-# docs/plan.md, Fase 2). Drive G1 around with teleop while this runs, then
-# save with:
-#   ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
-#     "{name: {data: '/tmp/g1_maps/<name>'}}"
-#   ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
-#     "{filename: '/tmp/g1_maps/<name>'}"
-# (create the directory first — service calls don't expand ~ or $HOME).
+# docs/plan.md). Drive the G1 around (teleop, or Nav2 goals with
+# g1_navigation mapping.launch.py nav2:=true), then save with
+#   src/g1_navigation/scripts/run_nav.sh --save-map <name>
+# or nav_ui's "Save Map" button: both write <name>.{yaml,pgm,posegraph,data}
+# into src/g1_navigation/maps.
 
 slam_toolbox:
   ros__parameters:
@@ -22,17 +25,17 @@ slam_toolbox:
 
     odom_frame: odom
     map_frame: map
-    base_frame: pelvis
+    base_frame: base_link
     scan_topic: /scan
     mode: mapping
 
     debug_logging: false
     throttle_scans: 1
-    transform_publish_period: 0.02
+    transform_publish_period: 0.05  # 20 Hz: 50 Hz made nav_central's Python TF listener a CPU hog
     map_update_interval: 1.0
     resolution: 0.05
     min_laser_range: 0.20
-    max_laser_range: 12.0
+    max_laser_range: 20.0
     minimum_time_interval: 0.2
     transform_timeout: 0.2
     tf_buffer_duration: 30.0
@@ -44,7 +47,7 @@ slam_toolbox:
     minimum_travel_distance: 0.2
     minimum_travel_heading: 0.2
     scan_buffer_size: 10
-    scan_buffer_maximum_scan_distance: 12.0
+    scan_buffer_maximum_scan_distance: 20.0
     link_match_minimum_response_fine: 0.1
     link_scan_maximum_distance: 1.5
     loop_search_maximum_distance: 3.0

@@ -4,11 +4,12 @@
   <name>g1_nav_overlay</name>
   <version>0.0.1</version>
   <description>
-    Nav2/slam_toolbox configuration for the G1's Track A kinematic virtual
-    base: nav2_g1.yaml (base, ported from vendor/home2's nav2_omni.yaml) +
-    nav2_g1_sim_overlay.yaml (sim deltas, deep-merged at launch), bridge_gz.yaml
-    (ros_gz_bridge config), mapper_params_sim.yaml (localization) and
-    mapper_params_mapping.yaml (mapping). See docs/plan.md.
+    Nav2/slam_toolbox configuration for the G1: nav2_g1.yaml (base, ported
+    from vendor/home2's nav2_omni.yaml) plus per-mode overlays deep-merged by
+    g1_navigation (nav2_g1_sim_overlay.yaml for Gazebo, nav2_g1_mujoco_overlay.yaml,
+    nav2_g1_robot_overlay.yaml, nav2_g1_following.yaml), bridge_gz.yaml
+    (ros_gz_bridge), mapper_params_mapping.yaml and
+    mapper_params_localization.yaml (slam_toolbox). See docs/plan.md.
   </description>
   <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
   <license>Apache-2.0</license>
