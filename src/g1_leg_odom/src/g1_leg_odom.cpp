@@ -27,7 +27,7 @@ class G1LegOdomNode : public rclcpp::Node {
 public:
   G1LegOdomNode() : Node("g1_leg_odom"), odom_(params()) {
     odom_frame_ = declare_parameter("odom_frame", std::string("odom"));
-    base_frame_ = declare_parameter("base_frame", std::string("pelvis"));
+    base_frame_ = declare_parameter("base_frame", std::string("base_link"));
     publish_tf_ = declare_parameter("publish_tf", true);
     const double rate = declare_parameter("publish_rate", 50.0);
     const auto iface = declare_parameter("dds_network_interface", std::string("lo"));

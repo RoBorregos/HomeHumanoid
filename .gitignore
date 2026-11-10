@@ -19,6 +19,7 @@ third_party/joystick_sniff
 third_party/lowstate_sniff
 third_party/virtual_gamepad
 third_party/pos_sniff
+third_party/lio_ws/
 
 # vendored G1 URDF/meshes (run src/g1_description/scripts/vendor_g1.sh)
 src/g1_description/urdf/g1_29dof_raw.urdf

@@ -53,7 +53,11 @@ public:
     duration_ = declare_parameter("command_duration", 0.3);
     const bool auto_start = declare_parameter("auto_start", false);
     odom_frame_ = declare_parameter("odom_frame", std::string("odom"));
-    base_frame_ = declare_parameter("base_frame", std::string("pelvis"));
+    base_frame_ = declare_parameter("base_frame", std::string("base_link"));
+    // With odom_source:=lio (g1_bringup), FAST-LIO owns /odom and odom -> base_link:
+    // this node then publishes its leg estimate on /odom_leg without TF, for comparison.
+    const auto odom_topic = declare_parameter("odom_topic", std::string("/odom"));
+    publish_tf_ = declare_parameter("publish_tf", true);
     const auto iface = declare_parameter("dds_network_interface", std::string("eth0"));
     const auto domain = declare_parameter("dds_domain_id", 0);
     g1_leg_odom::LegOdometry::Params lp;
@@ -77,7 +81,7 @@ public:
         wz_ = std::clamp(m->twist.angular.z, -max_wz_, max_wz_);
         last_cmd_ = std::chrono::steady_clock::now();
       });
-    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic, 10);
     tf_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     odom_timer_ = create_wall_timer(20ms, [this] { publish_odom(); });
     reset_srv_ = create_service<std_srvs::srv::Trigger>(
@@ -158,11 +162,12 @@ private:
     geometry_msgs::msg::TransformStamped t;
     g1_leg_odom::to_msgs(p, get_clock()->now(), odom_frame_, base_frame_, o, t);
     odom_pub_->publish(o);
-    tf_->sendTransform(t);
+    if (publish_tf_) tf_->sendTransform(t);
   }
 
   double cmd_timeout_, max_vx_, max_vy_, max_wz_, duration_;
   std::string odom_frame_, base_frame_;
+  bool publish_tf_ = true;
   std::chrono::duration<double> period_{0.1};
 
   std::mutex cmd_mutex_;

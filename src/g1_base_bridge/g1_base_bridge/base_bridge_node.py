@@ -8,7 +8,7 @@ seconds — Gazebo's VelocityControl plugin holds the last command forever
 otherwise, so without this the robot keeps drifting after Nav2 stops talking
 (lost connection, finished a goal mid-motion-blend, etc).
 
-Also publishes /odom and broadcasts the odom -> pelvis TF itself, computed
+Also publishes /odom and broadcasts the odom -> base_link TF itself, computed
 by integrating the same cmd_vel it relays to Gazebo rather than reading
 Gazebo's OdometryPublisher plugin. That plugin's own <tf_topic> output was
 already confirmed empty on the Orin, but a second, worse issue killed the
@@ -54,8 +54,11 @@ class G1BaseBridge(Node):
         self.declare_parameter("cmd_vel_timeout", 0.5)
         self.declare_parameter("odom_out_topic", "/odom")
         self.declare_parameter("odom_frame", "odom")
-        self.declare_parameter("base_frame", "pelvis")
+        self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("odom_publish_frequency", 50.0)
+        # false when another source owns odom -> base_link (FAST-LIO in sim):
+        # the dead-reckoned /odom is then only a reference.
+        self.declare_parameter("publish_tf", True)
         self.declare_parameter("spawn_x", 0.0)
         self.declare_parameter("spawn_y", 0.0)
         self.declare_parameter("spawn_yaw", 0.0)
@@ -88,6 +91,7 @@ class G1BaseBridge(Node):
             self._odom_pub = self.create_publisher(
                 Odometry, self.get_parameter("odom_out_topic").value, 10
             )
+            self._publish_tf = self.get_parameter("publish_tf").value
             self._tf_broadcaster = TransformBroadcaster(self)
             odom_freq = self.get_parameter("odom_publish_frequency").value
             self._last_odom_time = self.get_clock().now()
@@ -166,7 +170,8 @@ class G1BaseBridge(Node):
         t.transform.translation.y = self._odom_y
         t.transform.rotation.z = qz
         t.transform.rotation.w = qw
-        self._tf_broadcaster.sendTransform(t)
+        if self._publish_tf:
+            self._tf_broadcaster.sendTransform(t)
 
 
 def main(args=None):

@@ -17,9 +17,13 @@ under gravity in Gazebo; see `docs/plan.md`). Re-run it on any machine that
 needs to build this package, same as `third_party/`'s clones.
 
 `g1.urdf.xacro` is the committed wrapper: it `xacro:include`s the vendored
-raw URDF and adds the Gazebo-specific pieces (`VelocityControl` +
-`OdometryPublisher` plugins on `pelvis`, a `gpu_lidar` sensor on the existing
-`mid360_link` mount point) — mirrors how `vendor/home2/simulation/
+raw URDF and adds the Gazebo-specific pieces (`VelocityControl` plugin on
+`pelvis`, a 3D `gpu_lidar` + IMU on the existing `mid360_link` mount point) — mirrors how `vendor/home2/simulation/
 frida_gz_sim/urdf/frida_gz.urdf.xacro` wraps FRIDA's real URDF.
 
 `launch/description.launch.py` already points at `g1.urdf.xacro` by default.
+It also publishes the static `base_link -> pelvis` transform (`base_height`,
+0.79 m): `base_link` is the planar footprint on the floor that every
+odometry source moves (`odom -> base_link`) and that Nav2, slam_toolbox and
+the ported home2 nodes use. The URDF root stays `pelvis`, so Gazebo's model
+is unchanged.

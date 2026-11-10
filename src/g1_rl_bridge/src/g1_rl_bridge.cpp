@@ -105,7 +105,7 @@ public:
     spawn_y_ = declare_parameter("spawn_y", 0.0);
     spawn_yaw_ = declare_parameter("spawn_yaw", 0.0);
     odom_frame_ = declare_parameter("odom_frame", std::string("odom"));
-    base_frame_ = declare_parameter("base_frame", std::string("pelvis"));
+    base_frame_ = declare_parameter("base_frame", std::string("base_link"));
     const auto odom_source = declare_parameter("odom_source", std::string("leg"));
     if (odom_source != "leg" && odom_source != "ground_truth")
       throw std::invalid_argument("odom_source must be 'leg' or 'ground_truth', got " + odom_source);
