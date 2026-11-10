@@ -1,0 +1,54 @@
+# FAST-LIO on the real MID-360 (livox_ros_driver2, xfer_format 1 = CustomMsg,
+# which carries the per-point offset_time FAST-LIO needs to deskew while the
+# robot walks). extrinsic_T is the MID-360's built-in IMU position in the lidar
+# frame from Livox's datasheet, same as FAST_LIO/config/mid360.yaml.
+# NOT VALIDATED ON THE G1 (docs/plan.md, M5).
+/**:
+  ros__parameters:
+    feature_extract_enable: false
+    point_filter_num: 3
+    max_iteration: 3
+    filter_size_surf: 0.3
+    filter_size_map: 0.3
+    cube_side_length: 200.0
+    runtime_pos_log_enable: false
+    map_file_path: ""
+
+    common:
+      lid_topic: "/livox/lidar"
+      imu_topic: "/livox/imu"
+      time_sync_en: false
+      time_offset_lidar_to_imu: 0.0
+
+    preprocess:
+      lidar_type: 1
+      scan_line: 4
+      # The head-mounted lidar sees the G1's own shoulders and arms within ~0.5 m.
+      blind: 0.5
+      timestamp_unit: 3
+      scan_rate: 10
+
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 40.0
+      extrinsic_est_en: false
+      extrinsic_T: [-0.011, -0.02329, 0.04412]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+
+    publish:
+      path_en: false
+      effect_map_en: false
+      map_en: false
+      scan_publish_en: true
+      dense_publish_en: false
+      scan_bodyframe_pub_en: false
+
+    pcd_save:
+      pcd_save_en: false
+      interval: -1

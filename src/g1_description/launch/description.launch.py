@@ -1,8 +1,15 @@
-"""Publishes the G1's robot_state_publisher from the xacro in urdf/.
+"""Publishes the G1's robot_state_publisher from the xacro in urdf/, plus the
+static base_link -> pelvis transform.
 
-M2a placeholder: urdf/ currently only has instructions (README.md); g1.urdf.xacro
-still needs to be vendored from unitreerobotics/unitree_ros before this launch
-file actually works.
+base_link is the planar footprint under the pelvis, on the floor. Odometry
+(g1_base_bridge, g1_rl_bridge, g1_loco_bridge, or FAST-LIO through
+g1_perception's adapter) publishes odom -> base_link, and the URDF tree hangs
+below pelvis, so the full chain is map -> odom -> base_link -> pelvis -> ...
+That keeps base_link, the frame every home2 node assumes, without re-rooting
+the URDF Gazebo spawns.
+
+Run src/g1_description/scripts/vendor_g1.sh first — g1.urdf.xacro includes
+the vendored g1_29dof_raw.urdf, which is gitignored (see urdf/README.md).
 """
 
 import os
@@ -12,6 +19,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -31,11 +39,31 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "robot_description": Command(
-                    ["xacro ", LaunchConfiguration("xacro_path")]
-                )
+                "robot_description": ParameterValue(
+                    Command(["xacro ", LaunchConfiguration("xacro_path")]),
+                    value_type=str,
+                ),
+                "use_sim_time": LaunchConfiguration("use_sim_time"),
             }
         ],
     )
 
-    return LaunchDescription([xacro_arg, robot_state_publisher])
+    base_height_arg = DeclareLaunchArgument(
+        "base_height",
+        default_value="0.79",
+        description="Pelvis height over the floor in the standing pose (m)",
+    )
+    use_sim_time_arg = DeclareLaunchArgument("use_sim_time", default_value="false")
+
+    base_to_pelvis = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="base_link_to_pelvis",
+        arguments=["--frame-id", "base_link", "--child-frame-id", "pelvis",
+                   "--z", LaunchConfiguration("base_height")],
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+    )
+
+    return LaunchDescription(
+        [xacro_arg, base_height_arg, use_sim_time_arg, robot_state_publisher, base_to_pelvis]
+    )

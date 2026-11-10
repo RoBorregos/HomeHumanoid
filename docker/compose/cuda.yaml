@@ -18,10 +18,8 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - ../../src:/ws/src
-      - ../../vendor:/ws/vendor
-      - ../../third_party:/ws/third_party
-      - ../../worlds:/ws/worlds
+      # The whole repo, so ./run.sh, src/, vendor/ and third_party/ are all in /ws.
+      - ../..:/ws
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp

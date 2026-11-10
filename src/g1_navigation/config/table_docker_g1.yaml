@@ -1,0 +1,29 @@
+# table_docker (ported unchanged from home2) with G1 values. UNTESTED on the
+# G1: the perpendicular approach strafes (vy), which the walking policy does,
+# but slower and less precisely than FRIDA's omni base, so tolerances are
+# looser and speeds lower. Off by default in navigation.launch.py.
+table_docker:
+  ros__parameters:
+    cmd_vel_topic: /cmd_vel
+    scan_topic: /scan
+    cloud_topic: /livox/points_filtered
+    odom_topic: /odom
+    base_frame: base_link
+    odom_frame: odom
+    detect_source: both
+    det_min_height: 0.20
+    det_max_height: 1.20
+    # base_link -> front-most part of the G1: the forearms in the default pose
+    # (~0.38 m, see g1_perception/config/lidar_pipeline.yaml). MEASURE.
+    front_offset: 0.40
+    target_distance: 0.10
+    min_safe: 0.20
+    yaw_tol: 0.06
+    y_tol: 0.06
+    dist_tol: 0.05
+    max_wz: 0.3
+    max_vx: 0.15
+    max_vy: 0.15
+    min_vx: 0.08
+    # nav_central assumes this back-off (frida_constants RETREAT_DISTANCE).
+    retreat_distance: 0.2

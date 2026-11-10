@@ -9,6 +9,21 @@ log/
 third_party/unitree_mujoco/
 third_party/unitree_rl_lab/
 third_party/unitree_ros/
+third_party/unitree_sdk2/
+third_party/unitree_sdk2_python/
+third_party/*.o
+third_party/lowstate_relay
+third_party/walk_relay
+third_party/joystick_inject
+third_party/joystick_sniff
+third_party/lowstate_sniff
+third_party/virtual_gamepad
+third_party/pos_sniff
+third_party/lio_ws/
+
+# vendored G1 URDF/meshes (run src/g1_description/scripts/vendor_g1.sh)
+src/g1_description/urdf/g1_29dof_raw.urdf
+src/g1_description/meshes/
 
 # editors / OS
 .vscode/

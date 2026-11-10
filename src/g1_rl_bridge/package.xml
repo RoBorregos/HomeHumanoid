@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_rl_bridge</name>
+  <version>0.1.0</version>
+  <description>Nav2 cmd_vel to unitree_rl_lab velocity policy bridge for the G1 in MuJoCo (Track B).</description>
+  <maintainer email="roborregos@todo.todo">RoBorregos</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>std_srvs</depend>
+  <depend>g1_leg_odom</depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,98 @@
+<?xml version="1.0"?>
+<!--
+  G1 wrapped for Gazebo Track A (kinematic virtual base — see docs/plan.md).
+  Includes the vendored g1_29dof_raw.urdf (run scripts/vendor_g1.sh first —
+  this file and meshes/ are gitignored, not committed) and adds:
+    - A VelocityControl Gazebo plugin on `pelvis` (the model's actual root
+      link; G1's URDF does not use `base_link`).
+    - A 3D gpu_lidar + IMU on the existing `mid360_link` mount point, standing
+      in for the real Livox MID-360 (cloud on /livox/lidar, IMU on /livox/imu
+      once bridged, same names as livox_ros_driver2 on the robot).
+  The 29 leg/waist/arm joints are already locked to `fixed` by the vendor
+  script (Track A has no actuation for them); this file does not touch them.
+
+  No OdometryPublisher plugin: it was confirmed to stop publishing /sim/odom
+  shortly after spawn on this Gazebo Harmonic build, even while the model
+  kept moving under VelocityControl (see g1_base_bridge's module docstring).
+  Odometry and the odom -> base_link TF are published by g1_base_bridge instead,
+  dead-reckoned from the same cmd_vel it relays — exact for this
+  velocity-controlled kinematic base, and sidesteps the plugin entirely.
+-->
+<robot name="g1" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="g1_29dof_raw.urdf"/>
+
+  <gazebo>
+    <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+      <topic>/sim/cmd_vel</topic>
+    </plugin>
+  </gazebo>
+
+  <!-- Velocity-driven, not physically simulated -->
+  <gazebo reference="pelvis">
+    <gravity>false</gravity>
+  </gazebo>
+
+  <!-- Livox MID-360 stand-in: a 3D gpu_lidar on the existing mid360_link mount.
+       The real G1 carries the MID-360 upside down in its head, so it covers
+       roughly -52..+7 deg around the horizon instead of the sensor's nominal
+       -7..+52: modelled here directly as the vertical range in mid360_link,
+       which keeps the URDF frame untouched. Check the real mount with the
+       lidar's own IMU (gravity along -z if inverted) before trusting the
+       URDF extrinsic on the robot (docs/plan.md, M5).
+       Gazebo publishes the cloud on <topic>/points; bridge_gz.yaml maps it to
+       /livox/lidar (sensor_msgs/PointCloud2), the real driver's topic name.
+       gpu_lidar, not the CPU "lidar": both need Ogre2 on this Gazebo build. -->
+  <xacro:property name="lidar_h_samples" value="720"/>
+  <xacro:property name="lidar_v_samples" value="32"/>
+  <xacro:property name="lidar_v_min" value="-0.9076"/>
+  <xacro:property name="lidar_v_max" value="0.1222"/>
+  <gazebo reference="mid360_link">
+    <sensor name="mid360" type="gpu_lidar">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <topic>/g1/mid360</topic>
+      <gz_frame_id>mid360_link</gz_frame_id>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>${lidar_h_samples}</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.14159</min_angle>
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+          <vertical>
+            <samples>${lidar_v_samples}</samples>
+            <resolution>1</resolution>
+            <min_angle>${lidar_v_min}</min_angle>
+            <max_angle>${lidar_v_max}</max_angle>
+          </vertical>
+        </scan>
+        <range>
+          <min>0.10</min>
+          <max>40.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </lidar>
+      <visualize>false</visualize>
+    </sensor>
+
+    <!-- The MID-360's built-in IMU, for FAST-LIO. On this kinematic base the
+         accelerometer only sees gravity plus the steps VelocityControl makes,
+         so it is a rough stand-in for a walking robot's IMU. -->
+    <sensor name="mid360_imu" type="imu">
+      <always_on>true</always_on>
+      <update_rate>200</update_rate>
+      <topic>/g1/mid360_imu</topic>
+      <gz_frame_id>mid360_link</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+  </gazebo>
+</robot>

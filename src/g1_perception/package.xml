@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>g1_perception</name>
+  <version>0.0.1</version>
+  <description>
+    MID-360 pipeline for the G1, the same in sim and on the robot: body crop,
+    3D cloud to /scan projection for slam_toolbox and the costmaps, and
+    optional FAST-LIO odometry (odom -> base_link) through lio_odom_adapter.
+    See docs/plan.md, M3.
+  </description>
+  <maintainer email="a00841255@tec.mx">RoBorregos</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>rclcpp_components</exec_depend>
+  <exec_depend>pcl_ros</exec_depend>
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <!-- Optional, from third_party/fetch_lio.sh (not rosdep-resolvable):
+       livox_ros_driver2 (enables livox_custom_to_pc2) and fast_lio. -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

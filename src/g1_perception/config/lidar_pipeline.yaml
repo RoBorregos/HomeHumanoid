@@ -1,0 +1,48 @@
+# MID-360 -> /livox/points_filtered (body removed) -> /scan, same in sim and on
+# the robot. Frames: base_link is the planar footprint on the floor (see
+# g1_description/launch/description.launch.py), so z here is height over the floor.
+
+drop_no_return:
+  ros__parameters:
+    # Only there to drop non-finite points: a PassThrough discards any point
+    # whose filter field is not finite. The limits are wider than any return.
+    filter_field_name: x
+    filter_limit_min: -1000.0
+    filter_limit_max: 1000.0
+    keep_organized: false
+
+body_crop:
+  ros__parameters:
+    # Box around the G1's own body and arms, removed (negative: true). The
+    # MID-360 sits in the head and sees the shoulders, arms and hands.
+    # The box is defined in base_link, but the output stays in the lidar's
+    # own frame so FAST-LIO (sim) can take it with an identity extrinsic.
+    input_frame: base_link
+    output_frame: mid360_link
+    # Forearms stick out to ~0.38 m in front at ~0.85 m height in the locked
+    # zero pose (measured in sim, 2026-11-10). Re-measure with the real arm pose.
+    min_x: -0.25
+    max_x: 0.42
+    min_y: -0.35
+    max_y: 0.35
+    min_z: -0.05
+    max_z: 1.45
+    negative: true
+    keep_organized: false
+
+cloud_to_scan:
+  ros__parameters:
+    target_frame: base_link
+    transform_tolerance: 0.05
+    # Height band (over the floor) that counts as an obstacle for the 2D
+    # scan. Floor below, ceiling/lamps above. The G1 is ~1.32 m tall.
+    min_height: 0.10
+    max_height: 1.50
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.0087  # 0.5 deg, 720 beams like the sim sensor
+    scan_time: 0.1
+    range_min: 0.30
+    range_max: 20.0
+    use_inf: true
+    inf_epsilon: 1.0
