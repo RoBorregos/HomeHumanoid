@@ -61,14 +61,16 @@ RUN git clone https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_s
     && cmake --build /tmp/unitree_sdk2/build_local -j"$(nproc)" --target install \
     && ldconfig && rm -rf /tmp/unitree_sdk2
 
+# Pinned downloads with retries (docker/scripts/fetch.sh): one layer each, so a
+# dropped connection doesn't redo the ones already done.
+COPY docker/scripts/fetch.sh /usr/local/bin/fetch.sh
+
 # MuJoCo + unitree_mujoco, at the versions used on the Orin.
 ARG MUJOCO_VERSION=3.17.0
 ARG UNITREE_MUJOCO_COMMIT=1eb6642e3f3fdfb7fb13a9794fd6a2dd93ea0e7d
-RUN curl -sSL "https://github.com/google-deepmind/mujoco/releases/download/${MUJOCO_VERSION}/mujoco-${MUJOCO_VERSION}-linux-$(uname -m).tar.gz" \
-      | tar xz -C /opt \
-    && git clone https://github.com/unitreerobotics/unitree_mujoco.git /opt/unitree_mujoco \
-    && git -C /opt/unitree_mujoco checkout ${UNITREE_MUJOCO_COMMIT} \
-    && ln -s /opt/mujoco-${MUJOCO_VERSION} /opt/unitree_mujoco/simulate/mujoco \
+RUN fetch.sh tar "https://github.com/google-deepmind/mujoco/releases/download/${MUJOCO_VERSION}/mujoco-${MUJOCO_VERSION}-linux-$(uname -m).tar.gz" /opt
+RUN fetch.sh git https://github.com/unitreerobotics/unitree_mujoco.git ${UNITREE_MUJOCO_COMMIT} /opt/unitree_mujoco
+RUN ln -s /opt/mujoco-${MUJOCO_VERSION} /opt/unitree_mujoco/simulate/mujoco \
     && cmake -S /opt/unitree_mujoco/simulate -B /opt/unitree_mujoco/simulate/build \
     && cmake --build /opt/unitree_mujoco/simulate/build -j"$(nproc)"
 COPY docker/simulation/unitree_mujoco_config.yaml /opt/unitree_mujoco/simulate/config.yaml
@@ -77,12 +79,11 @@ COPY docker/simulation/unitree_mujoco_config.yaml /opt/unitree_mujoco/simulate/c
 # vendored onnxruntime is x86_64: on aarch64 swap in the matching release.
 ARG UNITREE_RL_LAB_COMMIT=4960b84732b0c2ec593dccbfe963fda1bcd7b1e3
 ARG ONNXRUNTIME_VERSION=1.22.0
-RUN git clone https://github.com/unitreerobotics/unitree_rl_lab.git /opt/unitree_rl_lab \
-    && git -C /opt/unitree_rl_lab checkout ${UNITREE_RL_LAB_COMMIT} \
-    && if [ "$(uname -m)" = aarch64 ]; then \
-         cd /opt/unitree_rl_lab/deploy/thirdparty \
-         && rm -rf onnxruntime-linux-x64-${ONNXRUNTIME_VERSION} \
-         && curl -sSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-aarch64-${ONNXRUNTIME_VERSION}.tgz" | tar xz \
+RUN fetch.sh git https://github.com/unitreerobotics/unitree_rl_lab.git ${UNITREE_RL_LAB_COMMIT} /opt/unitree_rl_lab
+RUN if [ "$(uname -m)" = aarch64 ]; then \
+         rm -rf /opt/unitree_rl_lab/deploy/thirdparty/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION} \
+         && fetch.sh tar "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-aarch64-${ONNXRUNTIME_VERSION}.tgz" \
+              /opt/unitree_rl_lab/deploy/thirdparty \
          && sed -i "s/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}/onnxruntime-linux-aarch64-${ONNXRUNTIME_VERSION}/g" \
               /opt/unitree_rl_lab/deploy/robots/g1_29dof/CMakeLists.txt; \
        fi \

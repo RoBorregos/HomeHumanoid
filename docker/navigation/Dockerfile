@@ -42,8 +42,8 @@ RUN sudo apt-get update && (sudo rosdep init || true) && rosdep update --rosdist
 
 # unitree_sdk2 for g1_loco_bridge, at the commit third_party/ uses.
 ARG UNITREE_SDK2_COMMIT=8e1b927586712edd6a4c29d50dd52dff1e163439
-RUN git clone https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_sdk2 \
-    && git -C /tmp/unitree_sdk2 checkout ${UNITREE_SDK2_COMMIT} \
+COPY docker/scripts/fetch.sh /usr/local/bin/fetch.sh
+RUN fetch.sh git https://github.com/unitreerobotics/unitree_sdk2.git ${UNITREE_SDK2_COMMIT} /tmp/unitree_sdk2 \
     && cmake -S /tmp/unitree_sdk2 -B /tmp/unitree_sdk2/build -DBUILD_EXAMPLES=OFF \
     && sudo cmake --build /tmp/unitree_sdk2/build -j"$(nproc)" --target install \
     && sudo ldconfig && sudo rm -rf /tmp/unitree_sdk2

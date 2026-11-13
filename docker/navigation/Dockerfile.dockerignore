@@ -4,3 +4,4 @@
 !src/*/package.xml
 !vendor/home2/frida_interfaces/package.xml
 !third_party/fetch_lio.sh
+!docker/scripts/fetch.sh
