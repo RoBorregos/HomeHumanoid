@@ -72,7 +72,9 @@ RUN fetch.sh tar "https://github.com/google-deepmind/mujoco/releases/download/${
 RUN fetch.sh git https://github.com/unitreerobotics/unitree_mujoco.git ${UNITREE_MUJOCO_COMMIT} /opt/unitree_mujoco
 RUN ln -s /opt/mujoco-${MUJOCO_VERSION} /opt/unitree_mujoco/simulate/mujoco \
     && cmake -S /opt/unitree_mujoco/simulate -B /opt/unitree_mujoco/simulate/build \
-    && cmake --build /opt/unitree_mujoco/simulate/build -j"$(nproc)"
+    && cmake --build /opt/unitree_mujoco/simulate/build -j"$(nproc)" --target unitree_mujoco
+# Only the simulator: its jstest joystick tool misses <cstdint> and does not
+# build with GCC 13 (Ubuntu 24.04), and nothing here uses it.
 COPY docker/simulation/unitree_mujoco_config.yaml /opt/unitree_mujoco/simulate/config.yaml
 
 # unitree_rl_lab's deploy controller (g1_ctrl) only; no Isaac Lab. Its
