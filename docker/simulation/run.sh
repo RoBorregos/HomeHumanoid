@@ -69,9 +69,10 @@ mkdir -p cache/gz
 
 # No $VARS in these: COMMAND goes through .env, where compose would expand them.
 BASE_SETUP="source /opt/ros/jazzy/setup.bash && source /usr/local/bin/cyclonedds_setup.sh"
-# Only the sim side. frida_gz_sim for the arena world; selected, not up-to, as
-# its manifest also names home2's manipulation and vision packages.
-PACKAGES="frida_interfaces frida_constants frida_gz_sim g1_description g1_leg_odom g1_base_bridge \
+# Only the sim side, selected (not up-to). frida_gz_sim is left out: its manifest
+# needs home2's manipulation and vision packages, and sim_gz.launch.py reads the
+# arena world straight from vendor/home2.
+PACKAGES="frida_interfaces frida_constants g1_description g1_leg_odom g1_base_bridge \
 g1_rl_bridge g1_nav_overlay g1_perception g1_navigation g1_sim_bringup"
 COLCON="MAKEFLAGS=-j4 colcon build --symlink-install --parallel-workers 2 --packages-select $PACKAGES \
 --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"

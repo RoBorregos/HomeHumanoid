@@ -1,4 +1,8 @@
 # Navigation area (see Dockerfile). Values come from .env, written by run.sh.
+# Own project name: home2's compose for this area lives in a folder with the same
+# name, and compose would otherwise take its containers for ours.
+name: homehumanoid-navigation
+
 services:
   navigation:
     container_name: homehumanoid-navigation

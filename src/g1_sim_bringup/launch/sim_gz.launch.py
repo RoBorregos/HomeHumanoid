@@ -22,7 +22,7 @@ g1_navigation/maps.
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -36,8 +36,23 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _frida_gz_sim_dir():
+    """frida_gz_sim's share dir, or its source in vendor/home2 when it isn't built.
+
+    Only its worlds are used, and their SDFs are self-contained. The simulation
+    container doesn't build it: its manifest needs home2's manipulation and
+    vision packages (docker/simulation/run.sh).
+    """
+    try:
+        return get_package_share_directory("frida_gz_sim")
+    except PackageNotFoundError:
+        repo = os.environ.get("G1_REPO") or os.path.abspath(
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", ".."))
+        return os.path.join(repo, "vendor", "home2", "simulation", "frida_gz_sim")
+
+
 def _resource_path():
-    paths = [os.path.join(get_package_share_directory("frida_gz_sim"), "worlds")]
+    paths = [os.path.join(_frida_gz_sim_dir(), "worlds")]
     for prefix in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep):
         share = os.path.join(prefix, "share")
         if os.path.isdir(share):
@@ -167,7 +182,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "world",
             default_value=os.path.join(
-                get_package_share_directory("frida_gz_sim"), "worlds", "arena_robocup2026_1.sdf"
+                _frida_gz_sim_dir(), "worlds", "arena_robocup2026_1.sdf"
             ),
         ),
         DeclareLaunchArgument("map_name", default_value=os.environ.get("MAP_NAME", "robocup2026_1"),
