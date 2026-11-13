@@ -22,7 +22,7 @@ g1_navigation/maps.
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -36,8 +36,23 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _frida_gz_sim_dir():
+    """frida_gz_sim's share dir, or its source in vendor/home2 when it isn't built.
+
+    Only its worlds are used, and their SDFs are self-contained. The simulation
+    container doesn't build it: its manifest needs home2's manipulation and
+    vision packages (docker/simulation/run.sh).
+    """
+    try:
+        return get_package_share_directory("frida_gz_sim")
+    except PackageNotFoundError:
+        repo = os.environ.get("G1_REPO") or os.path.abspath(
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", ".."))
+        return os.path.join(repo, "vendor", "home2", "simulation", "frida_gz_sim")
+
+
 def _resource_path():
-    paths = [os.path.join(get_package_share_directory("frida_gz_sim"), "worlds")]
+    paths = [os.path.join(_frida_gz_sim_dir(), "worlds")]
     for prefix in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep):
         share = os.path.join(prefix, "share")
         if os.path.isdir(share):
@@ -122,10 +137,14 @@ def launch_setup(context, *args, **kwargs):
             "odom_out_topic": "/odom_bridge" if use_lio else "/odom",
         }],
     )
-    perception = _include("g1_perception", "lidar_pipeline.launch.py",
-                          {"use_sim_time": "true", "cloud_in": "/livox/lidar"})
-    robot = [bridge, clock_throttle, base_bridge, perception]
-    if use_lio:
+    robot = [bridge, clock_throttle, base_bridge]
+    # perception:=false leaves the lidar pipeline (and FAST-LIO) to the navigation
+    # container, g1_bringup/nav_area.launch.py (docker/navigation).
+    with_perception = arg("perception").lower() == "true"
+    if with_perception:
+        robot.append(_include("g1_perception", "lidar_pipeline.launch.py",
+                              {"use_sim_time": "true", "cloud_in": "/livox/lidar"}))
+    if use_lio and with_perception:
         robot.append(_include("g1_perception", "lio.launch.py", {
             "profile": "sim", "use_sim_time": "true",
             "initial_x": spawn["spawn_x"], "initial_y": spawn["spawn_y"], "initial_yaw": spawn["spawn_yaw"],
@@ -163,7 +182,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "world",
             default_value=os.path.join(
-                get_package_share_directory("frida_gz_sim"), "worlds", "arena_robocup2026_1.sdf"
+                _frida_gz_sim_dir(), "worlds", "arena_robocup2026_1.sdf"
             ),
         ),
         DeclareLaunchArgument("map_name", default_value=os.environ.get("MAP_NAME", "robocup2026_1"),
@@ -173,6 +192,8 @@ def generate_launch_description():
                               description="false: robot + sensors only (run g1_navigation yourself)"),
         DeclareLaunchArgument("mapping_nav2", default_value="true", description="slam:=mapping: Nav2 on the growing map"),
         DeclareLaunchArgument("nav_ui", default_value="false"),
+        DeclareLaunchArgument("perception", default_value="true",
+                              description="Lidar pipeline (+ FAST-LIO with odom_source:=lio) here; false: in the navigation container"),
         DeclareLaunchArgument("odom_source", default_value="bridge", description="bridge | lio"),
         # Defaults match robocup2026_1's start_location.safe_place in
         # g1_navigation/maps/areas/areas_robocup2026_1.json.

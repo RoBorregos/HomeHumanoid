@@ -1,0 +1,17 @@
+# unitree_mujoco's simulate/config.yaml for the G1 sim2sim with unitree_rl_lab's
+# g1_ctrl (third_party/README.md): both on interface lo, DDS domain 0.
+robot: "g1"
+robot_scene: "scene_29dof.xml"
+
+domain_id: 0
+interface: "lo"
+idl_type: -1
+
+use_joystick: 0
+joystick_type: "xbox"
+joystick_device: "/dev/input/js0"
+joystick_bits: 16
+
+print_scene_information: 1
+
+enable_elastic_band: 1    # the G1 starts hanging; release_band.py lowers it

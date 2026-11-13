@@ -9,9 +9,17 @@ RUN_NAV="$REPO/src/g1_navigation/scripts/run_nav.sh"
 
 usage() {
   cat << EOF
-Usage: ./run.sh [target] [task] [flags]
+Usage: ./run.sh <area> [task] [flags]         in the area's container (docker/<area>)
+       ./run.sh [target] [task] [flags]       natively, on this computer
 
-Targets (where the G1 runs):
+Areas (one container each, like home2's ./run.sh):
+  navigation         Lidar pipeline, FAST-LIO, slam_toolbox, Nav2, nav_central; on the
+                     real G1 also the MID-360 driver and g1_loco_bridge.
+  simulation         Gazebo and MuJoCo (development machines only).
+  vision, hri, ...   Forwarded to home2's ./run.sh (vendor/home2).
+  See ./run.sh navigation --help and ./run.sh simulation --help.
+
+Targets (native, where the G1 runs):
   sim                Gazebo: kinematic base, simulated MID-360. Mapping and navigation.
   mujoco             MuJoCo: the RL walking policy on its legs. Static map, no lidar.
   robot              The real G1 (UNTESTED on hardware: gantry and remote e-stop first).
@@ -59,9 +67,11 @@ EOF
 setup_env() {
   set +u
   source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
-  [ -f "$REPO/third_party/lio_ws/install/setup.bash" ] && source "$REPO/third_party/lio_ws/install/setup.bash"
-  [ -f "$REPO/install/setup.bash" ] || { echo "Not built yet: ./run.sh --build" >&2; exit 1; }
-  source "$REPO/install/setup.bash"
+  # Overridable for the containers (/workspace/install, /home/ros/lio_ws).
+  local lio="${G1_LIO_SETUP:-$REPO/third_party/lio_ws/install/setup.bash}" ws="${G1_INSTALL_DIR:-$REPO/install}"
+  [ -f "$lio" ] && source "$lio"
+  [ -f "$ws/setup.bash" ] || { echo "Not built yet: ./run.sh --build" >&2; exit 1; }
+  source "$ws/setup.bash"
   export G1_MAPS_DIR="${G1_MAPS_DIR:-$REPO/src/g1_navigation/maps}"
   mkdir -p "$LOG"
 }
@@ -124,6 +134,14 @@ ODOM="" HEADLESS="" MJ_DISPLAY="${DISPLAY:-}" KEEP_BAND=0 IFACE="" HOST_IP="" AU
 PASS=()
 
 [ $# -eq 0 ] && { usage; exit 0; }
+source "$REPO/lib.sh"
+case "$1" in
+  navigation|simulation)
+    area="$1"; shift
+    cd "$REPO/docker/$area" && exec bash ./run.sh "$@" "$(detect_env_type)" ;;
+  vision|hri|manipulation|integration|display|zed)
+    cd "$REPO/vendor/home2" && exec ./run.sh "$@" ;;
+esac
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;

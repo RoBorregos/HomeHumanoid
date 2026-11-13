@@ -1,0 +1,7 @@
+# The build context is the repo root; send only what the Dockerfile copies.
+**
+!src/*/package.xml
+!vendor/home2/frida_interfaces/package.xml
+!vendor/home2/docker/cyclonedds_setup.sh
+!docker/simulation/unitree_mujoco_config.yaml
+!docker/scripts/fetch.sh

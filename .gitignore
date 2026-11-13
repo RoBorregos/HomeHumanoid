@@ -35,3 +35,10 @@ Thumbs.db
 # env
 .env
 
+
+# docker/<area>: colcon trees, logs and caches of each container
+docker/*/build/
+docker/*/install/
+docker/*/log/
+docker/*/logs/
+docker/*/cache/
